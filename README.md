@@ -1,5 +1,6 @@
 # Terminal Emulator wth OpenGL Shaders
-The emualtor based off suckless st.c and inspired by Cool Retro Term.  
+This emulator is based off suckless st.c and is inspired by Cool Retro Term.  
+Written in C++ with less then 3k lines, the emulator is intended to be customized and rebuilt to fit your preferences.  It supports most XTERM standard escape codes, with good support for multiplexers and vim.  The app is built with IMGUI for performant GPU rendering and can be embedded in other apps such as [Ned](https://github.com/nealmick/ned).
 
 
 # Build from source
@@ -30,6 +31,5 @@ make
 ./terd
 ```
 
-The emulator has built in OpenGL shaders which are inteded to create effets such a retro CRT look and more.
-
+Contributions are welcome.
 
