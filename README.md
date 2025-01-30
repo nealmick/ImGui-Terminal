@@ -1,6 +1,6 @@
-# Terminal Emulator wth OpenGL Shaders
-This emulator is based off suckless st.c and is inspired by Cool Retro Term.  
-Written in C++ with less then 3k lines, the emulator is intended to be customized and rebuilt to fit your preferences.  It supports most XTERM standard escape codes, with good support for multiplexers and vim.  The app is built with IMGUI for performant GPU rendering and can be embedded in other apps such as [Ned](https://github.com/nealmick/ned).
+# Terminal Emulator with OpenGL Shaders
+A crappy terminal emulator based off suckless st.c and inspired by Cool Retro Term.  
+Written in C++ with less than 3k lines, the emulator is intended to be customized and rebuilt to fit your preferences. It supports most XTERM standard escape codes, with good support for multiplexers and vim. The app is built with IMGUI for performant GPU rendering and can be embedded in other apps such as [Ned](https://github.com/nealmick/ned).
 
 
 # Build from source
