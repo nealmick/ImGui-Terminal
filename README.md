@@ -2,6 +2,7 @@
 A crappy terminal emulator based off suckless st.c and inspired by Cool Retro Term.  
 Written in C++ with less than 3k lines, the emulator is intended to be customized and rebuilt to fit your preferences. It supports most XTERM standard escape codes, with good support for multiplexers and vim. The app is built with IMGUI for performant GPU rendering and can be embedded in other apps such as [Ned](https://github.com/nealmick/ned).
 
+The emulator also includes OpenGL shaders which can be used for visual effects, such as old CRT look with scanlines, pixelation, static noise, vignetting, and color shift.   You must rebuild the project to update the shaders.  
 
 # Build from source
 #### Prerequisites
