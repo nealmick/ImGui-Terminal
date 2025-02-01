@@ -785,19 +785,37 @@ void Terminal::writeChar(Rune u) {
         }
     }
 
-    // Rest of your existing writeChar implementation
+    if (state.c.x >= state.col) {
+        // Set wrap flag on current line before moving to next
+        if (state.c.y < state.row && state.c.x > 0) {
+            state.lines[state.c.y][state.c.x - 1].mode |= ATTR_WRAP;
+        }
+        
+        state.c.x = 0;
+        if (state.c.y == state.bot) {
+            scrollUp(state.top, 1);
+        } else if (state.c.y < state.row - 1) {
+            state.c.y++;
+        }
+    }
+
     Glyph g;
     g.u = u;
     g.mode = state.c.attrs;
     g.fg = state.c.fg;
     g.bg = state.c.bg;
     g.colorMode = state.c.colorMode;
+    g.trueColorFg = state.c.trueColorFg;
+    g.trueColorBg = state.c.trueColorBg;
+
+    // Set wrap flag if at end of line
+    if (state.c.x == state.col - 1) {
+        g.mode |= ATTR_WRAP;
+    }
 
     writeGlyph(g, state.c.x, state.c.y);
     state.c.x++;
-    state.lastc = u;
 }
-
 int Terminal::eschandle(unsigned char ascii) {
     switch (ascii) {
         case '[':
@@ -2388,7 +2406,11 @@ void Terminal::tsetmode(int priv, int set, const std::vector<int>& args) {
                     tmoveato(0, 0);
                     break;
                 case 7: // DECAWM -- Auto wrap
-                    MODBIT(state.mode, set, MODE_WRAP);
+                    if (set) {
+                        state.mode |= MODE_WRAP;
+                    } else {
+                        state.mode &= ~MODE_WRAP;
+                    }
                     break;
                 case 0:  // Error (IGNORED)
                 case 2:  // DECANM -- ANSI/VT52 (IGNORED)
