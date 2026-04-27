@@ -1,0 +1,30 @@
+# Compiled object files
+*.o
+*.a
+
+# St — upstream binary (built by `cd st && make`)
+st/st
+*.1
+
+# Vim swap files
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Generated headers
+.config.h
+st/config.h
+config-imgui.h
+
+# Patch backups
+*.orig
+*.diff
+
+# ImGui runtime files
+imgui.ini
+
+# Build output (Makefile.imgui)
+build/
