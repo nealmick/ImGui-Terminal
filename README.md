@@ -12,9 +12,18 @@ anything — wherever ImGui runs this terminal runs.
 
 ## Build
 
+Builds the default GLFW + OpenGL example. Requires GLFW, fontconfig, and freetype.
+
 ```sh
 make
 ./build/imgui_terminal
+```
+
+Alternative renderers:
+
+```sh
+make metal     # ./build/imgui_terminal_metal   (macOS only)
+make vulkan    # ./build/imgui_terminal_vulkan  (requires Vulkan SDK)
 ```
 
 

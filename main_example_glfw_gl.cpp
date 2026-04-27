@@ -1,11 +1,14 @@
 /* See LICENSE for license details. */
 /*
- * main.cpp — standalone shell hosting the imgui_win terminal widget.
+ * main_example_glfw_gl.cpp — standalone shell hosting the imgui_win
+ * terminal widget. Default `make` target.
  *
  * This file owns the GLFW window + OpenGL context. It exists as the
  * canonical demo of how to embed the terminal widget. Anyone wanting a
  * different backend (SDL+Vulkan, native+Metal, etc.) writes their own
- * main_*.cpp and links the same imgui_win.o.
+ * main_*.cpp / main_*.mm and links the same imgui_win.o. See
+ * example_mac_metal.mm and example_glfw_vulkan.cpp for alternative
+ * renderer hosts.
  *
  * The widget itself (imgui_win.cpp) has zero GLFW or GL dependencies —
  * see readme for the rules.

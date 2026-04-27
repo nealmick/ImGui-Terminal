@@ -28,7 +28,7 @@ VPATH = st
 SOURCES  = imgui_win.cpp
 
 # Shell — owns GLFW + OpenGL backend.
-SOURCES += main.cpp
+SOURCES += main_example_glfw_gl.cpp
 
 # ImGui core
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
@@ -146,6 +146,101 @@ $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 # Link with $(CXX) so the C++ runtime is pulled in for ImGui.
 $(EXE): $(OBJS)
 	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS)
+
+##---------------------------------------------------------------------
+## METAL TARGET — alternative renderer (macOS only)
+##---------------------------------------------------------------------
+##
+## Same widget (imgui_win.cpp) and core (st.c) as the default OpenGL
+## build; only the host shell and ImGui's renderer backend differ.
+## Demonstrates the renderer-agnostic principle: identical terminal
+## behavior, different GPU API underneath.
+##
+## Build: `make metal`  →  $(BUILD_DIR)/imgui_terminal_metal
+
+EXE_METAL = $(BUILD_DIR)/imgui_terminal_metal
+
+# Metal source list: the same set as SOURCES, but with the GL host shell
+# swapped for example_mac_metal.mm and imgui_impl_opengl3.cpp swapped
+# for imgui_impl_metal.mm. Object basenames differ, so the two builds
+# share the rest of build/ without conflict.
+METAL_SOURCES  = imgui_win.cpp example_mac_metal.mm
+METAL_SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
+METAL_SOURCES += $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp $(IMGUI_DIR)/backends/imgui_impl_metal.mm
+METAL_SOURCES += $(IMGUI_DIR)/misc/freetype/imgui_freetype.cpp
+
+METAL_OBJS = $(addprefix $(BUILD_DIR)/, $(addsuffix .o, $(basename $(notdir $(METAL_SOURCES)))))
+
+# Metal-specific link libraries — Metal/MetalKit/QuartzCore replace
+# OpenGL. Cocoa/IOKit/CoreVideo + GLFW + fontconfig/freetype are
+# common to both renderers but listed here explicitly since the LIBS
+# variable above is OpenGL-targeted.
+LIBS_METAL  = -framework Metal -framework MetalKit -framework QuartzCore
+LIBS_METAL += -framework Cocoa -framework IOKit -framework CoreVideo
+LIBS_METAL += -L/usr/local/lib -L/opt/homebrew/lib -lglfw
+LIBS_METAL += $(shell pkg-config --libs fontconfig freetype2)
+
+# .mm compilation. clang treats .mm as Objective-C++ by extension; the
+# rest of CXXFLAGS works as-is.
+$(BUILD_DIR)/%.o: %.mm | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(BUILD_DIR)/%.o: $(IMGUI_DIR)/backends/%.mm | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+.PHONY: metal
+metal: $(EXE_METAL)
+	@echo Metal build complete
+
+$(EXE_METAL): $(METAL_OBJS) $(C_OBJS)
+	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS_METAL)
+
+##---------------------------------------------------------------------
+## VULKAN TARGET — alternative renderer (cross-platform)
+##---------------------------------------------------------------------
+##
+## Requires the Vulkan SDK installed:
+##   macOS: brew install vulkan-headers vulkan-loader molten-vk
+##          (or LunarG VulkanSDK)
+##   Linux: apt install libvulkan-dev (Debian/Ubuntu) or distro equivalent
+##
+## Build: `make vulkan`  →  $(BUILD_DIR)/imgui_terminal_vulkan
+
+EXE_VULKAN = $(BUILD_DIR)/imgui_terminal_vulkan
+
+VULKAN_SOURCES  = imgui_win.cpp example_glfw_vulkan.cpp
+VULKAN_SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
+VULKAN_SOURCES += $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp $(IMGUI_DIR)/backends/imgui_impl_vulkan.cpp
+VULKAN_SOURCES += $(IMGUI_DIR)/misc/freetype/imgui_freetype.cpp
+
+VULKAN_OBJS = $(addprefix $(BUILD_DIR)/, $(addsuffix .o, $(basename $(notdir $(VULKAN_SOURCES)))))
+
+# Vulkan link libraries — cross-platform via pkg-config. Plus the
+# common GLFW + fontconfig + freetype the widget needs.
+LIBS_VULKAN  = $(shell pkg-config --libs vulkan)
+LIBS_VULKAN += -L/usr/local/lib -L/opt/homebrew/lib -lglfw
+LIBS_VULKAN += $(shell pkg-config --libs fontconfig freetype2)
+
+# rpath so the binary finds libvulkan at runtime — pkg-config gives
+# us the lib dir; embed it as an rpath so dyld/ld.so can resolve
+# libvulkan.1.dylib (or libvulkan.so) without LD_LIBRARY_PATH /
+# DYLD_LIBRARY_PATH gymnastics at run time.
+VULKAN_LIBDIR := $(shell pkg-config --variable=libdir vulkan)
+LIBS_VULKAN += -Wl,-rpath,$(VULKAN_LIBDIR)
+
+ifeq ($(UNAME_S), Darwin)
+	LIBS_VULKAN += -framework Cocoa -framework IOKit -framework CoreVideo
+endif
+ifeq ($(UNAME_S), Linux)
+	LIBS_VULKAN += -lutil
+endif
+
+.PHONY: vulkan
+vulkan: $(EXE_VULKAN)
+	@echo Vulkan build complete
+
+$(EXE_VULKAN): $(VULKAN_OBJS) $(C_OBJS)
+	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS_VULKAN)
 
 clean:
 	rm -rf $(BUILD_DIR)
