@@ -40,7 +40,7 @@ find_bash(void)
 	for (int i = 0; candidates[i]; i++) {
 		if (access(candidates[i], X_OK) == 0) {
 			snprintf(path, sizeof path, "%s", candidates[i]);
-			fprintf(stderr, "test_setup: bash = %s\n", path);
+			/*  fprintf(stderr, "test_setup: bash = %s\n", path);  */
 			return path;
 		}
 	}

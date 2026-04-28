@@ -620,7 +620,9 @@ imw_loadcols(void)
 		colors[i] = c;
 	}
 
-	/*  One-time diagnostic — verifies parser + rgb.txt lookup work.  */
+	/*  One-time palette diagnostic — commented out for clean console.
+	    Uncomment to verify parser + rgb.txt lookup at startup.
+
 	auto dump = [](int i, const char *label) {
 		ImU32 c = colors[i];
 		fprintf(stderr, "  [%3d] %-12s = #%02x%02x%02x\n", i, label,
@@ -640,6 +642,7 @@ imw_loadcols(void)
 	dump(255, "gray255");
 	dump(258, "fg");
 	dump(259, "bg");
+	*/
 }
 
 static int
@@ -1882,6 +1885,9 @@ imw_finalize_metrics(void)
 	}
 	dc.metrics_derived = true;
 
+	/*  Font-load diagnostic — commented out for clean console.
+	    Uncomment to dump cell metrics + slot warnings at startup.
+
 	fprintf(stderr,
 	    "imgui_win: fonts loaded. "
 	    "regular ascent=%d descent=%d w=%d h=%d  ->  cw=%d ch=%d  "
@@ -1892,6 +1898,7 @@ imw_finalize_metrics(void)
 	    dc.bfont.badslant, dc.bfont.badweight,
 	    dc.ifont.badslant, dc.ifont.badweight,
 	    dc.ibfont.badslant, dc.ibfont.badweight);
+	*/
 }
 
 /*
