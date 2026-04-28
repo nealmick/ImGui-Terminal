@@ -23,7 +23,7 @@ IMGUI_DIR = imgui
 # flags lets imgui_win.cpp's #include "st.h" resolve. Host-shell examples
 # live in examples/ — same VPATH trick keeps the .o files at build/<name>.o
 # regardless of source location.
-VPATH = st examples
+VPATH = st examples tests/automation/core tests/automation/input
 
 # C++ sources
 # Widget — renderer-agnostic. NO GLFW, NO GL deps.
@@ -243,6 +243,51 @@ vulkan: $(EXE_VULKAN)
 
 $(EXE_VULKAN): $(VULKAN_OBJS) $(C_OBJS)
 	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS_VULKAN)
+
+##---------------------------------------------------------------------
+## TEST CLIENTS — headless harnesses for tests/automation/
+##---------------------------------------------------------------------
+##
+## Same imgui_win.cpp + st.c as the shipping binaries. No GLFW, no GPU
+## backend. Two flavors:
+##
+##   test_core  — scripted bash child writes to PTY; dump after EOF.
+##                Tests render pipeline (xdrawline, color resolution,
+##                attribute pipeline, glyph emission). No frame loop.
+##                Build: `make test_core`  →  $(BUILD_DIR)/test_core
+##
+##   test_input — bash -i; events.txt drives ImGui keyboard/mouse
+##                events between real frames. Tests the input pipeline
+##                end-to-end (ImGui event → dispatcher → ttywrite →
+##                bash → ttyread → row cache).
+##                Build: `make test_input` →  $(BUILD_DIR)/test_input
+
+# Shared sources (imgui core + freetype loader). The harness-specific
+# main lives in TEST_CORE_SRC / TEST_INPUT_SRC below.
+TEST_SHARED_SOURCES  = imgui_win.cpp
+TEST_SHARED_SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
+TEST_SHARED_SOURCES += $(IMGUI_DIR)/misc/freetype/imgui_freetype.cpp
+
+TEST_SHARED_OBJS = $(addprefix $(BUILD_DIR)/, $(addsuffix .o, $(basename $(notdir $(TEST_SHARED_SOURCES)))))
+
+# No GLFW, no OpenGL/Metal/Vulkan. fontconfig+freetype are required because
+# imgui_win.cpp's font loading uses them.
+LIBS_TEST = $(shell pkg-config --libs fontconfig freetype2)
+
+EXE_TEST_CORE  = $(BUILD_DIR)/test_core
+EXE_TEST_INPUT = $(BUILD_DIR)/test_input
+
+.PHONY: test_core test_input
+test_core:  $(EXE_TEST_CORE)
+	@echo "Test client core build complete"
+test_input: $(EXE_TEST_INPUT)
+	@echo "Test client input build complete"
+
+$(EXE_TEST_CORE): $(BUILD_DIR)/test_core.o  $(TEST_SHARED_OBJS) $(C_OBJS)
+	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS_TEST)
+
+$(EXE_TEST_INPUT): $(BUILD_DIR)/test_input.o $(TEST_SHARED_OBJS) $(C_OBJS)
+	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS_TEST)
 
 clean:
 	rm -rf $(BUILD_DIR)

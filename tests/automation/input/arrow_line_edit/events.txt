@@ -1,0 +1,14 @@
+# Stage 2 (kmap, non-Ctrl): Left-arrow sends \e[D, which readline
+# interprets as backward-char in line edit. Type a command, move
+# cursor mid-line with Left, insert a character, run.
+# Verifies: ImGui LeftArrow event → Stage 2 → \e[D → readline cursor
+# move → typed chars insert at cursor (not at end).
+
+wait 30
+type echo abc
+key Left
+key Left
+key Left
+type X
+key Enter
+wait 60

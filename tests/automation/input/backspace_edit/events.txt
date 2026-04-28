@@ -1,0 +1,13 @@
+# Stage 2 (kmap): Backspace key sends \x7f (DEL) which readline interprets
+# as backward-delete-char. Type extra chars, backspace them, type the real
+# tail, run. Verifies: ImGui Backspace key event → kmap → \x7f → readline
+# edits → bash echoes back the modified line.
+
+wait 30
+type echo helloXYZ
+key Backspace
+key Backspace
+key Backspace
+type world
+key Enter
+wait 60

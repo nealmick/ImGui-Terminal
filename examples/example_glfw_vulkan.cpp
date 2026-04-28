@@ -1,28 +1,28 @@
 /* See LICENSE for license details. */
 /*
- * example_glfw_vulkan.cpp — alternative shell using Vulkan for
- * rendering, with GLFW for windowing/input.
- *
- * Functionally equivalent to main_example_glfw_gl.cpp and
- * example_mac_metal.mm — same widget (imgui_win.cpp), same core (st.c),
- * different GPU API.
- * Demonstrates the renderer-agnostic principle: anywhere ImGui has a
- * backend, this terminal runs.
- *
- * Vulkan setup is verbose by nature (instance, physical device, queue
- * family, descriptor pool, swapchain, framebuffers, fences,
- * semaphores). Most of the boilerplate below is lifted from ImGui's
- * canonical glfw+vulkan example with the demo windows and validation
- * layers stripped. ImGui_ImplVulkanH_* helpers wrap the swapchain
- * lifecycle.
- *
- *   Build:  `make vulkan`   →   build/imgui_terminal_vulkan
- *
- * Requires the Vulkan SDK + GLFW with Vulkan support:
- *   - macOS:  brew install vulkan-headers vulkan-loader molten-vk
- *             (or install LunarG VulkanSDK)
- *   - Linux:  apt install libvulkan-dev   (Debian/Ubuntu)
- */
+	example_glfw_vulkan.cpp — alternative shell using Vulkan for
+	rendering, with GLFW for windowing/input.
+
+	Functionally equivalent to main_example_glfw_gl.cpp and
+	example_mac_metal.mm — same widget (imgui_win.cpp), same core (st.c),
+	different GPU API.
+	Demonstrates the renderer-agnostic principle: anywhere ImGui has a
+	backend, this terminal runs.
+
+	Vulkan setup is verbose by nature (instance, physical device, queue
+	family, descriptor pool, swapchain, framebuffers, fences,
+	semaphores). Most of the boilerplate below is lifted from ImGui's
+	canonical glfw+vulkan example with the demo windows and validation
+	layers stripped. ImGui_ImplVulkanH_* helpers wrap the swapchain
+	lifecycle.
+
+	  Build:  `make vulkan`   →   build/imgui_terminal_vulkan
+
+	Requires the Vulkan SDK + GLFW with Vulkan support:
+	  - macOS:  brew install vulkan-headers vulkan-loader molten-vk
+	            (or install LunarG VulkanSDK)
+	  - Linux:  apt install libvulkan-dev   (Debian/Ubuntu)
+*/
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -37,12 +37,14 @@
 #include <GLFW/glfw3.h>
 
 /* Public API of imgui_win.cpp (the widget). */
-extern void term_init(int cols, int rows);
+extern void term_init(int cols, int rows, char **argv);
 extern void term_draw_widget(void);
 extern void term_shutdown(void);
 
-/* Vulkan globals — file-static; the example uses globals because the
- * setup/cleanup helpers reference them across functions. */
+/*
+	Vulkan globals — file-static; the example uses globals because the
+	setup/cleanup helpers reference them across functions.
+*/
 static VkAllocationCallbacks   *g_alloc          = nullptr;
 static VkInstance               g_instance       = VK_NULL_HANDLE;
 static VkPhysicalDevice         g_physical       = VK_NULL_HANDLE;
@@ -326,7 +328,7 @@ main(int, char **)
 	init.CheckVkResultFn = check_vk;
 	ImGui_ImplVulkan_Init(&init);
 
-	term_init(80, 24);
+	term_init(80, 24, NULL);
 
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();

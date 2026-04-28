@@ -1,0 +1,10 @@
+# Stage 1 (shortcuts): Ctrl+Shift+V invokes the clippaste shortcut, which
+# reads ImGui's clipboard and writes the bytes to the PTY (no bracketed
+# paste — MODE_BRCKTPASTE off by default). Verifies: clipboard preset →
+# Ctrl+Shift+V → Stage 1 → clippaste → ttywrite(text) → bash command line.
+
+wait 30
+clipboard echo pasted
+chord Ctrl+Shift V
+key Enter
+wait 60

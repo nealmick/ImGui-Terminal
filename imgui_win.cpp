@@ -213,6 +213,13 @@ static int imw_last_motion_y = -1;
 static bool imw_was_focused = false;
 
 /*
+	Test-only focus override. When true, term_draw_widget treats the
+	canvas as focused regardless of ImGui::IsItemFocused(). Only flipped
+	by term_test_force_focus(); production code never touches this.
+*/
+static bool imw_test_force_focus = false;
+
+/*
 	Title — set by xsettitle, displayed via ImGui::Begin label using the
 	###id pattern.
 */
@@ -2437,7 +2444,7 @@ imw_dispatch_mouse(void)
 /*  Public widget API  */
 
 void
-term_init(int cols, int rows)
+term_init(int cols, int rows, char **argv)
 {
 	/*
 		Provisional cell metrics — replaced after first frame's atlas bake
@@ -2465,7 +2472,7 @@ term_init(int cols, int rows)
 		its own copy as `cmdfd` for ttyread/ttywrite. We keep a copy for
 		the per-frame select() poll.
 	*/
-	imw_cmdfd = ttynew(NULL, NULL, NULL, NULL);
+	imw_cmdfd = ttynew(NULL, NULL, NULL, argv);
 	if (imw_cmdfd < 0)
 		die("imgui_win: ttynew failed\n");
 }
@@ -2522,7 +2529,8 @@ term_draw_widget(void)
 			uses this for `set -g focus-events on`; vim uses it for
 			autoread.
 		*/
-		bool term_focused = ImGui::IsItemFocused();
+		/*  Second clause: test harnesses opt in via term_test_force_focus().  */
+		bool term_focused = ImGui::IsItemFocused() || imw_test_force_focus;
 		if (term_focused)
 			tw.mode |=  MODE_FOCUSED;
 		else
@@ -2614,6 +2622,139 @@ term_shutdown(void)
 		time; the host owns that, not us. We don't free `dc.col[]` because
 		`colors[]` is a static array, not heap.
 	*/
+}
+
+/*
+	term_test_force_focus — make the focus gate treat the canvas as
+	focused so imw_dispatch_keyboard runs each frame. Call once before
+	the test's frame loop. Sticky for the lifetime of the process; real
+	binaries never call this.
+*/
+void
+term_test_force_focus(void)
+{
+	imw_test_force_focus = true;
+}
+
+/*
+	term_dump_json — verbatim serialization of the adapter's draw-op cache.
+	No interpretation: every entry in imw_row_ops[] and imw_overlay_ops is
+	emitted as-is. Forced canonicalizations (pointer/u32 → portable string)
+	only:
+	  - col (ImU32) → "#rrggbb" (raw int isn't portable across runs)
+	  - font (ImFont*) → 4-way slot match against dc.font/bfont/ifont/ibfont
+	    or "other" (pointer addresses aren't stable across runs)
+	  - text bytes → JSON-escaped string of the literal op.bytes[0..len]
+	Adapter-state scalars (cw/ch/tw/th, mode, cursor shape, title) come
+	straight from `tw` and `term_title`. Reads no st.c state.
+*/
+static const char *
+imw_dump_font_name(ImFont *f)
+{
+	if (f == dc.font.match)    return "regular";
+	if (f == dc.bfont.match)   return "bold";
+	if (f == dc.ifont.match)   return "italic";
+	if (f == dc.ibfont.match)  return "bold_italic";
+	return "other";
+}
+
+static void
+imw_dump_color(FILE *out, ImU32 c)
+{
+	int r = (int)((c >>  0) & 0xff);
+	int g = (int)((c >>  8) & 0xff);
+	int b = (int)((c >> 16) & 0xff);
+	fprintf(out, "\"#%02x%02x%02x\"", r, g, b);
+}
+
+static void
+imw_dump_jstr(FILE *out, const char *s, int len)
+{
+	fputc('"', out);
+	for (int i = 0; i < len; i++) {
+		unsigned char c = (unsigned char)s[i];
+		switch (c) {
+		case '"':  fputs("\\\"", out); break;
+		case '\\': fputs("\\\\", out); break;
+		case '\b': fputs("\\b",  out); break;
+		case '\f': fputs("\\f",  out); break;
+		case '\n': fputs("\\n",  out); break;
+		case '\r': fputs("\\r",  out); break;
+		case '\t': fputs("\\t",  out); break;
+		default:
+			if (c < 0x20) fprintf(out, "\\u%04x", c);
+			else          fputc(c, out);
+		}
+	}
+	fputc('"', out);
+}
+
+static void
+imw_dump_op(FILE *out, const DrawOp &op)
+{
+	switch (op.kind) {
+	case DrawOp::RECT:
+		fprintf(out, "{\"kind\":\"RECT\",\"p0\":[%g,%g],\"p1\":[%g,%g],\"col\":",
+		    op.p0.x, op.p0.y, op.p1.x, op.p1.y);
+		imw_dump_color(out, op.col);
+		fputc('}', out);
+		break;
+	case DrawOp::TEXT:
+		fprintf(out, "{\"kind\":\"TEXT\",\"p0\":[%g,%g],\"col\":",
+		    op.p0.x, op.p0.y);
+		imw_dump_color(out, op.col);
+		fprintf(out, ",\"font\":\"%s\",\"text\":", imw_dump_font_name(op.font));
+		imw_dump_jstr(out, (const char *)op.bytes, op.len);
+		fputc('}', out);
+		break;
+	case DrawOp::PUSH_CLIP:
+		fprintf(out, "{\"kind\":\"PUSH_CLIP\",\"p0\":[%g,%g],\"p1\":[%g,%g]}",
+		    op.p0.x, op.p0.y, op.p1.x, op.p1.y);
+		break;
+	case DrawOp::POP_CLIP:
+		fputs("{\"kind\":\"POP_CLIP\"}", out);
+		break;
+	}
+}
+
+static void
+imw_dump_oplist(FILE *out, const std::vector<DrawOp> &ops)
+{
+	for (size_t i = 0; i < ops.size(); i++) {
+		if (i) fputc(',', out);
+		imw_dump_op(out, ops[i]);
+	}
+}
+
+void
+term_dump_json(FILE *out)
+{
+	fprintf(out, "{\n");
+	fprintf(out, "  \"cw\": %d,\n",            tw.cw);
+	fprintf(out, "  \"ch\": %d,\n",            tw.ch);
+	fprintf(out, "  \"tw\": %d,\n",            tw.tw);
+	fprintf(out, "  \"th\": %d,\n",            tw.th);
+	fprintf(out, "  \"mode\": %d,\n",          tw.mode);
+	fprintf(out, "  \"cursor_shape\": %d,\n",  tw.cursor);
+	fprintf(out, "  \"title\": ");
+	imw_dump_jstr(out, term_title, (int)strlen(term_title));
+	fprintf(out, ",\n");
+
+	int rows = (int)imw_row_ops.size();
+	fprintf(out, "  \"rows\": [");
+	for (int r = 0; r < rows; r++) {
+		fputs(r ? ",\n    " : "\n    ", out);
+		fprintf(out, "{\"row\":%d,\"ops\":[", r);
+		imw_dump_oplist(out, imw_row_ops[r]);
+		fputc(']', out);
+		fputc('}', out);
+	}
+	fprintf(out, "\n  ],\n");
+
+	fprintf(out, "  \"overlay\": [");
+	imw_dump_oplist(out, imw_overlay_ops);
+	fprintf(out, "]\n");
+	fprintf(out, "}\n");
 }
 
 

@@ -1,0 +1,10 @@
+# Stage 3 (text input): Multi-byte UTF-8 codepoints. The literal é
+# (U+00E9, 2 bytes \xc3\xa9 in UTF-8) is decoded by the parser to a
+# single codepoint and pushed via AddInputCharacter. Stage 3 then
+# encodes back via utf8encode() and writes 2 bytes to the PTY; bash
+# echoes them back; the parser decodes to a Glyph with rune 0xE9.
+
+wait 30
+type echo naïve
+key Enter
+wait 60

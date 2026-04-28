@@ -28,3 +28,6 @@ imgui.ini
 
 # Build output (Makefile.imgui)
 build/
+
+# Per-test latest run output — only expected.json is committed
+tests/automation/*/*/actual.json

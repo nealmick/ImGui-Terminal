@@ -1,0 +1,12 @@
+# Stage 2b (Ctrl+letter): Ctrl+C maps to byte \x03 which the kernel
+# delivers to the foreground process group as SIGINT. Run a long sleep,
+# interrupt with Ctrl+C, observe bash returns to the prompt. Verifies:
+# ImGui Ctrl+C event → Stage 2b → ttywrite("\x03") → kernel SIGINT →
+# bash signal handler prints '^C' and re-prompts.
+
+wait 30
+type sleep 30
+key Enter
+wait 60
+chord Ctrl C
+wait 200

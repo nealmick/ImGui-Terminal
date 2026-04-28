@@ -1,19 +1,19 @@
 /* See LICENSE for license details. */
 /*
- * example_mac_metal.mm — alternative shell using Metal for rendering
- * on macOS.
- *
- * Functionally equivalent to main_example_glfw_gl.cpp, but renders via
- * Metal (Apple's GPU API) instead of OpenGL3. GLFW still owns windowing
- * and input — only the renderer changes. Demonstrates the renderer-
- * agnostic principle: imgui_win.cpp is unchanged, only this host shell
- * differs.
- *
- * macOS only. The .mm extension is required because Metal is an
- * Objective-C API.
- *
- *   Build: `make metal`   →   build/imgui_terminal_metal
- */
+	example_mac_metal.mm — alternative shell using Metal for rendering
+	on macOS.
+
+	Functionally equivalent to main_example_glfw_gl.cpp, but renders via
+	Metal (Apple's GPU API) instead of OpenGL3. GLFW still owns windowing
+	and input — only the renderer changes. Demonstrates the renderer-
+	agnostic principle: imgui_win.cpp is unchanged, only this host shell
+	differs.
+
+	macOS only. The .mm extension is required because Metal is an
+	Objective-C API.
+
+	  Build: `make metal`   →   build/imgui_terminal_metal
+*/
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -27,9 +27,11 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
 
-/* Public API of imgui_win.cpp (the widget). C++ linkage — these
- * functions are defined as plain C++ in imgui_win.cpp, not extern "C". */
-extern void term_init(int cols, int rows);
+/*
+	Public API of imgui_win.cpp (the widget). C++ linkage — these
+	functions are defined as plain C++ in imgui_win.cpp, not extern "C".
+*/
+extern void term_init(int cols, int rows, char **argv);
 extern void term_draw_widget(void);
 extern void term_shutdown(void);
 
@@ -90,7 +92,7 @@ main(int, char **)
 
 	MTLRenderPassDescriptor *passDesc = [MTLRenderPassDescriptor new];
 
-	term_init(80, 24);
+	term_init(80, 24, NULL);
 
 	while (!glfwWindowShouldClose(window)) {
 		@autoreleasepool {

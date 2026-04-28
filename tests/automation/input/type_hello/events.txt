@@ -1,0 +1,16 @@
+# First input test: type "echo hello", press Enter, wait for shell to
+# respond. Verifies the full pipeline:
+#   ImGui InputCharacter → InputQueueCharacters → Stage 3 ttywrite
+#   → bash → bash echoes back → ttyread → row cache → dump.
+# Expected dump: a row with "echo hello", another row with "hello"
+# (bash output), and a fresh prompt below.
+
+# Let bash boot and print its initial prompt before we start typing.
+wait 60
+
+type echo hello
+
+key Enter
+
+# Wait for bash to run the command and re-prompt.
+wait 90
