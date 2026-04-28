@@ -11,6 +11,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       # bash 5 (homebrew) — test_setup.h's find_bash() prefers
       # /opt/homebrew/bin/bash; baselines were generated against bash 5,
