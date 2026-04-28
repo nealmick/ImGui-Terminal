@@ -20,8 +20,10 @@ IMGUI_DIR = imgui
 
 # Upstream st codebase lives in st/ as a vendored dependency. VPATH lets
 # the %.o : %.c pattern rule find st.c there, and -Ist on the compile
-# flags lets imgui_win.cpp's #include "st.h" resolve.
-VPATH = st
+# flags lets imgui_win.cpp's #include "st.h" resolve. Host-shell examples
+# live in examples/ — same VPATH trick keeps the .o files at build/<name>.o
+# regardless of source location.
+VPATH = st examples
 
 # C++ sources
 # Widget — renderer-agnostic. NO GLFW, NO GL deps.

@@ -34,6 +34,14 @@
 #include <string.h>
 #include <sys/select.h>
 
+/* Executable-path lookup for resolving rgb.txt relative to the binary
+ * (instead of the CWD). No portable C API for this — short platform block. */
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -913,14 +921,49 @@ imw_lookup_rgb(const char *name, uint8_t *r, uint8_t *g, uint8_t *b)
 }
 
 static void
+imw_get_exe_dir(char *out, size_t n)
+{
+	out[0] = '\0';
+#ifdef __APPLE__
+	uint32_t sz = (uint32_t)n;
+	if (_NSGetExecutablePath(out, &sz) != 0)
+		return;
+#elif defined(__linux__)
+	ssize_t r = readlink("/proc/self/exe", out, n - 1);
+	if (r <= 0)
+		return;
+	out[r] = '\0';
+#endif
+	char *slash = strrchr(out, '/');
+	if (slash)
+		*slash = '\0';
+}
+
+static void
 imw_load_rgb_db(void)
 {
 	if (!imw_rgb_db.empty())
 		return;
-	FILE *f = fopen("rgb.txt", "r");
+
+	/* Try <exe_dir>/../rgb.txt (binary in build/, rgb.txt at repo root),
+	 * then <exe_dir>/rgb.txt (rgb.txt installed alongside the binary),
+	 * then ./rgb.txt as a CWD fallback. */
+	FILE *f = NULL;
+	char dir[1024];
+	imw_get_exe_dir(dir, sizeof dir);
+	if (dir[0]) {
+		char path[1024];
+		snprintf(path, sizeof path, "%s/../rgb.txt", dir);
+		f = fopen(path, "r");
+		if (!f) {
+			snprintf(path, sizeof path, "%s/rgb.txt", dir);
+			f = fopen(path, "r");
+		}
+	}
 	if (!f)
-		die("imgui_win: cannot open rgb.txt at repo root: %s\n",
-		    strerror(errno));
+		f = fopen("rgb.txt", "r");
+	if (!f)
+		die("imgui_win: cannot open rgb.txt: %s\n", strerror(errno));
 	char line[256];
 	while (fgets(line, sizeof line, f)) {
 		if (line[0] == '!' || line[0] == '#')
