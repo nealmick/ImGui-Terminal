@@ -1,0 +1,82 @@
+name: macos-arm-test-suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  macos-arm:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # bash 5 (homebrew) — test_setup.h's find_bash() prefers
+      # /opt/homebrew/bin/bash; baselines were generated against bash 5,
+      # not the macOS-shipped 3.2 at /bin/bash.
+      # glfw — required for the default `make` target (GLFW + OpenGL3 host).
+      # fontconfig + freetype — required by imgui_win.cpp's font loader,
+      # used by both production and test binaries.
+      - name: Install dependencies
+        run: brew install bash glfw fontconfig freetype
+
+      - name: Build default target (GLFW + OpenGL)
+        run: make
+
+      - name: Build test clients
+        run: make test_core test_input
+
+      # Each test below is its own step so the Actions UI shows pass/fail
+      # per test. `if: success() || failure()` lets every test run
+      # regardless of whether earlier tests passed — useful when several
+      # are broken and you want to see all of them in one CI run.
+
+      # --- core suite ---
+      - name: core / attrs_basic
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/attrs_basic/input.sh --output /tmp/actual.json && diff -q tests/automation/core/attrs_basic/expected.json /tmp/actual.json
+      - name: core / colors_ansi_16
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/colors_ansi_16/input.sh --output /tmp/actual.json && diff -q tests/automation/core/colors_ansi_16/expected.json /tmp/actual.json
+      - name: core / colors_osc4
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/colors_osc4/input.sh --output /tmp/actual.json && diff -q tests/automation/core/colors_osc4/expected.json /tmp/actual.json
+      - name: core / colors_truecolor
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/colors_truecolor/input.sh --output /tmp/actual.json && diff -q tests/automation/core/colors_truecolor/expected.json /tmp/actual.json
+      - name: core / cursor_bar
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/cursor_bar/input.sh --output /tmp/actual.json && diff -q tests/automation/core/cursor_bar/expected.json /tmp/actual.json
+      - name: core / cursor_block
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/cursor_block/input.sh --output /tmp/actual.json && diff -q tests/automation/core/cursor_block/expected.json /tmp/actual.json
+      - name: core / cursor_underline
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/cursor_underline/input.sh --output /tmp/actual.json && diff -q tests/automation/core/cursor_underline/expected.json /tmp/actual.json
+      - name: core / hello
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/hello/input.sh --output /tmp/actual.json && diff -q tests/automation/core/hello/expected.json /tmp/actual.json
+      - name: core / wide_cjk
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/wide_cjk/input.sh --output /tmp/actual.json && diff -q tests/automation/core/wide_cjk/expected.json /tmp/actual.json
+
+      # --- input suite ---
+      - name: input / arrow_line_edit
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/arrow_line_edit/events.txt --output /tmp/actual.json && diff -q tests/automation/input/arrow_line_edit/expected.json /tmp/actual.json
+      - name: input / backspace_edit
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/backspace_edit/events.txt --output /tmp/actual.json && diff -q tests/automation/input/backspace_edit/expected.json /tmp/actual.json
+      - name: input / clipboard_paste
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/clipboard_paste/events.txt --output /tmp/actual.json && diff -q tests/automation/input/clipboard_paste/expected.json /tmp/actual.json
+      - name: input / ctrl_c_interrupt
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/ctrl_c_interrupt/events.txt --output /tmp/actual.json && diff -q tests/automation/input/ctrl_c_interrupt/expected.json /tmp/actual.json
+      - name: input / type_hello
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/type_hello/events.txt --output /tmp/actual.json && diff -q tests/automation/input/type_hello/expected.json /tmp/actual.json
+      - name: input / utf8_typing
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/utf8_typing/events.txt --output /tmp/actual.json && diff -q tests/automation/input/utf8_typing/expected.json /tmp/actual.json
