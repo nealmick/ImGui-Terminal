@@ -11,7 +11,7 @@
 	macOS only. The .mm extension is required because Cocoa and Metal
 	are Objective-C APIs.
 
-	  Build: `make osx`   →   build/imgui_terminal_osx
+	  Build: `make p_osx` from the repo root  →  build/p_osx
 */
 
 #import <Cocoa/Cocoa.h>
