@@ -307,9 +307,9 @@ $(EXE_TEST_INPUT): $(BUILD_DIR)/test_input.o $(TEST_SHARED_OBJS) $(C_OBJS)
 ## Same widget (imgui_win.cpp) and core (st.c) as the other targets.
 ## Replaces GLFW with native Cocoa windowing and Metal rendering.
 ##
-## Build: `make p_osx` →  $(BUILD_DIR)/imgui_terminal_osx
+## Build: `make p_osx` →  $(BUILD_DIR)/p_osx
 
-EXE_P_OSX = $(BUILD_DIR)/imgui_terminal_osx
+EXE_P_OSX = $(BUILD_DIR)/p_osx
 
 P_OSX_SOURCES  = imgui_win.cpp platform/OSX/main.mm
 P_OSX_SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp

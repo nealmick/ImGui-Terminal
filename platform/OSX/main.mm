@@ -231,6 +231,12 @@ int
 main(int, const char **)
 {
 	@autoreleasepool {
+		/* Disable "Press and Hold" for this app to ensure standard key
+		   repeats work (holding 'j' sends repeated 'j' chars instead
+		   of showing the accent picker). Matches GLFW/SDL behavior. */
+		[[NSUserDefaults standardUserDefaults] setBool:NO
+		                                       forKey:@"ApplePressAndHoldEnabled"];
+
 		[NSApplication sharedApplication];
 		[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
