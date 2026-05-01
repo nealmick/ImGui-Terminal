@@ -297,16 +297,27 @@ static ImwGlyphSpec imw_specs_buf[IMW_SPECS_BUFLEN];
 
 	With caching: xdrawline writes DrawOp entries into imw_row_ops[y]
 	(replacing any previous content for that row). The replay loop in
-	term_draw_widget runs every frame, walking each row's cached ops
+	term_draw_canvas runs every frame, walking each row's cached ops
 	and feeding them to the real ImDrawList. Cache invalidation rides
 	on st.c's dirty array: when a row gets re-dirty, the next draw()
 	calls xdrawline which clears the cache for that row and re-records.
 
-	Two cases st.c doesn't know about, handled with one-line hooks:
-	  - MODE_BLINK toggle: tsetdirtattr(ATTR_BLINK) marks rows with
-	    blinking content dirty so the new visibility takes effect.
-	  - Palette mutation (xsetcolorname): redraw() marks all rows
-	    dirty so cached ops re-record with the updated palette.
+	Cache correctness depends on every visual change marking rows dirty.
+	Most paths land naturally:
+	  - Glyph mutation (twrite, tputc, tclearregion, tscrollup/down,
+	    selection extend/clear) all dirty inside st.c.
+	  - Palette mutation (OSC 4/10/11/104/110-112): st.c calls
+	    tfulldirt() inside the OSC handler (st.c:1945, 1970, 1983)
+	    after xsetcolorname succeeds — adapter has nothing to do.
+	  - Whole-screen MODE_REVERSE flip: imw_setmode calls redraw()
+	    on the bit transition (mirrors x.c:1739).
+	The two paths st.c can't see and the adapter must handle:
+	  - MODE_BLINK toggle: imw_tick_blink calls tsetdirtattr(ATTR_BLINK)
+	    after flipping MODE_BLINK so rows holding blinking content
+	    re-emit with the new visibility (mirrors x.c:2017).
+	  - Resize: imw_handle_resize calls redraw() because tresize only
+	    auto-dirties on grow, not shrink (st.c:2641-2647). Width-only
+	    shrink would otherwise leave stale ops with old x-coords.
 
 	The cursor is special: it's drawn on top of the row content every
 	frame and may move independently of dirty rows, so xdrawcursor
@@ -429,23 +440,21 @@ imw_drawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		Cursor draws into the per-frame overlay (cleared at start of each
 		draw cycle in imw_startdraw). Never goes into the row cache —
 		cursor moves and blinks independently of dirty rows.
+
+		Note: x.c::xdrawcursor (1528-1531) erases the previous cursor cell
+		by redrawing the underlying glyph at (ox, oy). We don't, and don't
+		need to: x.c renders into a persistent pixmap so stale cursor
+		pixels survive between frames; our overlay is cleared every frame
+		at imw_startdraw, and the row cache for oy already holds the
+		underlying glyph (selection inversion included — xdrawline applies
+		the XOR per-cell). Replay paints it before the overlay layers the
+		new cursor on top. The erase x.c does is purely redundant in our
+		model. og is therefore unused.
 	*/
+	(void)ox; (void)oy; (void)og;
 	imw_emit_target = &imw_overlay_ops;
 
-	/*
-		Erase the old cursor by redrawing the underlying glyph at (ox, oy).
-		If the old cell was selected, xdrawline rendered it with ATTR_REVERSE
-		XOR'd in (xdrawline:1672 over there -> our xdrawline mirrors); we
-		reproduce that here so the erase looks right. Mirrors x.c:1528-1531.
-	*/
-	if (selected(ox, oy))
-		og.mode ^= ATTR_REVERSE;
-	imw_drawglyph(og, ox, oy);
-
-	/*
-		MODE_HIDE: old cursor erased above, new cursor not drawn.
-		Mirrors x.c:1533.
-	*/
+	/*  MODE_HIDE: nothing to draw. Mirrors x.c:1533.  */
 	if (tw.mode & MODE_HIDE)
 		return;
 
@@ -1169,11 +1178,14 @@ imw_tick_blink(void)
 		return;
 	if (tattrset(ATTR_BLINK)) {
 		/*
-			Toggle MODE_BLINK via the same path st.c -> xsetmode that any
-			other mode flip uses, so the REVERSE-flip redraw side-effect
-			(in xsetmode) doesn't accidentally trigger here.
+			Mirror x.c::run line 2017: toggle MODE_BLINK then dirty
+			every row that has blinking content so xdrawline re-emits
+			with the new visibility. Without the tsetdirtattr call,
+			cached row ops keep the prior fg=bg (or fg≠bg) state baked
+			in and the visual blink stops under draw()-only mode.
 		*/
 		tw.mode ^= MODE_BLINK;
+		tsetdirtattr(ATTR_BLINK);
 	} else {
 		/*
 			Nothing blinking — keep MODE_BLINK in the "on" state so the
@@ -1314,13 +1326,40 @@ imw_pump_pty(void)
 {
 	if (imw_cmdfd < 0)
 		return;
+
+	/*
+		Drain the PTY until empty, time budget exhausted, or signal hit.
+		One ttyread() per frame is too slow for high-volume output (cat
+		of a big file, vim full-screen redraw); a fixed iteration cap
+		hides saturation and gives a constant per-frame cost. Time budget
+		degrades gracefully: under heavy bursts we bail when we've
+		consumed our slice of the frame, leaving the rest of the work
+		(input dispatch, draw, render) headroom and picking up the
+		backlog next frame.
+
+		~5ms target: at 60Hz the frame budget is ~16ms; the renderer
+		and ImGui itself need most of it. select() with a zero timeout
+		makes each iteration a non-blocking poll. EINTR is benign —
+		retry rather than treat a stray signal as "no data".
+	*/
+	const double drain_budget_s = 0.005;
+	const double deadline = ImGui::GetTime() + drain_budget_s;
 	fd_set rfds;
-	FD_ZERO(&rfds);
-	FD_SET(imw_cmdfd, &rfds);
 	struct timeval tv = { 0, 0 };
-	if (select(imw_cmdfd + 1, &rfds, NULL, NULL, &tv) > 0
-	    && FD_ISSET(imw_cmdfd, &rfds))
+	for (;;) {
+		FD_ZERO(&rfds);
+		FD_SET(imw_cmdfd, &rfds);
+		int n = select(imw_cmdfd + 1, &rfds, NULL, NULL, &tv);
+		if (n < 0) {
+			if (errno == EINTR) continue;
+			break;
+		}
+		if (n == 0 || !FD_ISSET(imw_cmdfd, &rfds))
+			break;
 		ttyread();
+		if (ImGui::GetTime() >= deadline)
+			break;
+	}
 }
 
 /*
@@ -1926,12 +1965,23 @@ imw_handle_resize(ImVec2 avail)
 
 	/*
 		Resize the per-row cache to match the new grid. Growing
-		default-constructs new empty vectors for added rows; tresize
-		marks new rows dirty internally so xdrawline will populate them
-		on the next draw cycle. Shrinking drops the trailing rows'
-		caches.
+		default-constructs new empty vectors for added rows;
+		shrinking drops the trailing rows' caches.
 	*/
 	imw_row_ops.resize(new_rows);
+
+	/*
+		st.c's tresize only dirties rows when the grid GROWS
+		(tclearregion in tresize fires only for mincol < col or
+		minrow < row). On a width-only shrink no dirty bit is set,
+		so the cached row ops keep their old wider x-coords and
+		replay past the new tw.tw. redraw() is the public st.c
+		entry point that does tfulldirt + draw — one extra full
+		emission this frame, but resize is rare and the explicit
+		draw() later in term_draw_canvas walks an empty dirty
+		array so it costs only the cursor overlay re-emit.
+	*/
+	redraw();
 }
 
 /*
@@ -2583,13 +2633,12 @@ term_draw_canvas(void)
 	/*
 		Run a draw cycle: xdrawline writes per-row ops into the
 		cache, xdrawcursor writes the cursor into the per-frame
-		overlay. Phase B uses redraw() so all rows re-record each
-		frame (cache is exercised but no perf win yet); Phase C
-		will switch to draw() and lean on st.c's dirty-tracking
-		to skip clean rows.
+		overlay. Phase C: use draw() to lean on st.c's dirty-tracking
+		to skip clean rows. Only rows that changed since the last
+		frame (or the cursor row) will re-record.
 	*/
 	if (dc.metrics_derived)
-		redraw();
+		draw();
 
 	/*
 		Replay all row caches in row order, then the cursor
