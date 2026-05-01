@@ -42,11 +42,11 @@
 
 	The harness boots EXACTLY like the production binaries:
 	term_init(80, 24, ["bash", "--noprofile", "--norc", "-i"]) — same
-	fonts, same palette, same PTY path. A real frame loop then calls
-	term_draw_widget() each iteration; per-frame events from the
-	schedule are injected into ImGui's IO before NewFrame. Focus is
-	pinned via term_test_force_focus() so imw_dispatch_keyboard runs
-	without a real mouse-driven IsItemFocused().
+	fonts, same palette, same PTY path. A real frame loop drives
+	term_draw_canvas() each iteration inside its own Begin/End with
+	SetKeyboardFocusHere() before the call so the canvas takes ImGui
+	keyboard focus without a real mouse click. Per-frame events from
+	the schedule are injected into ImGui's IO before NewFrame.
 */
 
 #include <errno.h>
@@ -68,9 +68,8 @@ extern "C" {
 }
 
 extern void term_init(int cols, int rows, char **argv);
-extern void term_draw_widget(void);
+extern void term_draw_canvas(void);
 extern void term_dump_json(FILE *out);
-extern void term_test_force_focus(void);
 
 /*  --- event schedule ----------------------------------------------- */
 
@@ -445,10 +444,6 @@ main(int argc, char **argv)
 
 	signal(SIGCHLD, SIG_IGN);
 
-	/*  Pin focus so imw_dispatch_keyboard runs every frame. No real
-	    mouse means no IsItemFocused() = true otherwise.  */
-	term_test_force_focus();
-
 	/*  Run a few extra drain frames after the last scheduled event so
 	    bash has time to echo the final keystroke before the dump.  */
 	int total_frames = last_frame + 30;
@@ -457,7 +452,18 @@ main(int argc, char **argv)
 	for (int frame = 0; frame < total_frames; frame++) {
 		inject_for_frame(frame);
 		ImGui::NewFrame();
-		term_draw_widget();
+		/*  Drive the canvas directly inside our own Begin/End so we
+		    can SetKeyboardFocusHere() in the same window context — the
+		    canvas's InvisibleButton is the next item submitted, so
+		    it ends up keyboard-focused without a real mouse click.  */
+		/*  Match the geometry term_draw_widget() used to create so the
+		    expected.json snapshots stay valid: 800x500 with default
+		    chrome (title bar takes ~21px → canvas is 800x459).  */
+		ImGui::SetNextWindowSize(ImVec2(800, 500), ImGuiCond_FirstUseEver);
+		ImGui::Begin("Terminal");
+		ImGui::SetKeyboardFocusHere();
+		term_draw_canvas();
+		ImGui::End();
 		ImGui::EndFrame();
 		usleep(2000);  /*  ~2ms — let bash echo back  */
 	}
@@ -468,7 +474,14 @@ main(int argc, char **argv)
 	for (int i = 0; i < 25; i++) {
 		usleep(2000);
 		ImGui::NewFrame();
-		term_draw_widget();
+		/*  Match the geometry term_draw_widget() used to create so the
+		    expected.json snapshots stay valid: 800x500 with default
+		    chrome (title bar takes ~21px → canvas is 800x459).  */
+		ImGui::SetNextWindowSize(ImVec2(800, 500), ImGuiCond_FirstUseEver);
+		ImGui::Begin("Terminal");
+		ImGui::SetKeyboardFocusHere();
+		term_draw_canvas();
+		ImGui::End();
 		ImGui::EndFrame();
 	}
 

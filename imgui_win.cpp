@@ -213,13 +213,6 @@ static int imw_last_motion_y = -1;
 static bool imw_was_focused = false;
 
 /*
-	Test-only focus override. When true, term_draw_widget treats the
-	canvas as focused regardless of ImGui::IsItemFocused(). Only flipped
-	by term_test_force_focus(); production code never touches this.
-*/
-static bool imw_test_force_focus = false;
-
-/*
 	Title — set by xsettitle, displayed via ImGui::Begin label using the
 	###id pattern.
 */
@@ -2484,6 +2477,142 @@ term_init(int cols, int rows, char **argv)
 		die("imgui_win: ttynew failed\n");
 }
 
+/*
+	term_draw_canvas — render the terminal into the *current* ImGui
+	window. The caller owns Begin/End and any window styling. Focus is
+	the standard ImGui IsItemFocused() on the InvisibleButton submitted
+	below: clicks on the canvas focus it, clicks elsewhere unfocus it,
+	all the usual rules. To force focus without a real click (initial
+	focus on a pinned native window, test harnesses), call
+	ImGui::SetKeyboardFocusHere() in the same Begin/End immediately
+	before calling this — the InvisibleButton is the first ImGui item
+	submitted here, so it receives the targeted focus.
+
+	If you just want a self-contained floating ImGui window with a
+	terminal in it, call term_draw_widget() instead.
+*/
+void
+term_draw_canvas(void)
+{
+	/*  First frame after atlas is baked — derive real cell metrics.  */
+	if (!dc.metrics_derived)
+		imw_finalize_metrics();
+
+	ImVec2 avail = ImGui::GetContentRegionAvail();
+	imw_handle_resize(avail);
+
+	/*
+		Reserve canvas. InvisibleButton handles click-to-focus AND must
+		remain the FIRST ImGui item submitted here — SetKeyboardFocusHere
+		called by the host before this function targets the next item,
+		so anything inserted ahead of this would silently steal focus.
+
+		EnableNav is required: InvisibleButton sets ImGuiItemFlags_NoNav
+		by default, which excludes it from keyboard nav and makes
+		SetKeyboardFocusHere() a no-op against it. Without the flag,
+		clicks still focus (different code path) but programmatic
+		focus from hosts/tests can't.
+	*/
+	ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+	ImGui::InvisibleButton("##term_canvas", avail,
+	                       ImGuiButtonFlags_MouseButtonLeft  |
+	                       ImGuiButtonFlags_MouseButtonRight |
+	                       ImGuiButtonFlags_MouseButtonMiddle |
+	                       ImGuiButtonFlags_EnableNav);
+	bool focused = ImGui::IsItemFocused();
+
+	/*
+		Focus drives MODE_FOCUSED (cursor style), the keyboard-dispatch
+		gate below, DECSET 1004 \033[I / \033[O emission edge-triggered
+		against imw_was_focused, and SetNextFrameWantCaptureKeyboard so
+		the platform backend's keyDown handler consumes the NSEvent
+		instead of bubbling it up to NSApp's "no responder" beep.
+	*/
+	if (focused) {
+		ImGui::SetNextFrameWantCaptureKeyboard(true);
+		tw.mode |=  MODE_FOCUSED;
+	} else {
+		tw.mode &= ~MODE_FOCUSED;
+	}
+	if ((tw.mode & MODE_FOCUS) && focused != imw_was_focused)
+		ttywrite(focused ? "\033[I" : "\033[O", 3, 0);
+	imw_was_focused = focused;
+
+	/*
+		Set the per-frame render context for xclear / xdrawglyphfontspecs.
+		Two fields, by design — see ImwRenderCtx comment.
+	*/
+	imw_ctx.canvas_pos = canvas_pos;
+	imw_ctx.dl         = ImGui::GetWindowDrawList();
+
+	/*
+		Background fill for the entire canvas. Direct draw (not
+		cached): the canvas-wide fill isn't tied to any row, runs
+		every frame, and provides the backdrop for areas that the
+		row caches don't cover (mainly during a resize where new
+		rows haven't been recorded yet).
+
+		Under MODE_REVERSE the canvas inverts: default-bg slots
+		become default-fg, mirroring x.c's xclear (line 856)
+		which picks `defaultfg` vs `defaultbg` by IS_SET(MODE_REVERSE).
+	*/
+	{
+		ImU32 bg_col = colors[(tw.mode & MODE_REVERSE)
+		                       ? defaultfg : defaultbg];
+		ImVec2 bg_p1(canvas_pos.x + avail.x,
+		             canvas_pos.y + avail.y);
+		imw_ctx.dl->AddRectFilled(canvas_pos, bg_p1, bg_col);
+	}
+
+	/*  Drain whatever the shell has emitted since last frame.  */
+	imw_pump_pty();
+
+	/*
+		Tick the blink timer (toggles MODE_BLINK every blinktimeout ms
+		when any cell has ATTR_BLINK).
+	*/
+	imw_tick_blink();
+
+	/*  Keyboard input dispatch (focus-gated + KBDLOCK-gated).  */
+	if (focused && !(tw.mode & MODE_KBDLOCK))
+		imw_dispatch_keyboard();
+
+	/*  Mouse input dispatch — selection vs reporting, by mode.  */
+	imw_dispatch_mouse();
+
+	/*
+		Run a draw cycle: xdrawline writes per-row ops into the
+		cache, xdrawcursor writes the cursor into the per-frame
+		overlay. Phase B uses redraw() so all rows re-record each
+		frame (cache is exercised but no perf win yet); Phase C
+		will switch to draw() and lean on st.c's dirty-tracking
+		to skip clean rows.
+	*/
+	if (dc.metrics_derived)
+		redraw();
+
+	/*
+		Replay all row caches in row order, then the cursor
+		overlay on top. canvas_pos is added at replay time so a
+		window drag (which changes canvas_pos but doesn't dirty
+		any rows) doesn't invalidate the cache.
+	*/
+	for (size_t y = 0; y < imw_row_ops.size(); y++)
+		imw_replay_ops(imw_row_ops[y], canvas_pos, imw_ctx.dl);
+	imw_replay_ops(imw_overlay_ops, canvas_pos, imw_ctx.dl);
+}
+
+/*
+	term_draw_widget — convenience wrapper. A self-contained floating
+	ImGui window with the terminal canvas inside, click-to-focus model.
+	Used by simple shells (e.g. examples/main_example_glfw_gl.cpp,
+	examples/example_mac_metal.mm) that don't want to manage their own
+	ImGui window.
+
+	Shells that need control of the windowing (native-window pinning,
+	custom flags / styling, multi-pane layouts, etc.) should call
+	term_draw_canvas directly inside their own Begin/End instead.
+*/
 void
 term_draw_widget(void)
 {
@@ -2500,116 +2629,8 @@ term_draw_widget(void)
 	*/
 	ImGui::SetNextWindowSize(ImVec2(800, 500), ImGuiCond_FirstUseEver);
 
-	/*
-		Gate body on Begin's return —> only run when window is visible
-		(not collapsed).
-	*/
-	bool visible = ImGui::Begin(label);
-	if (visible) {
-		/*  First frame after atlas is baked — derive real cell metrics.  */
-		if (!dc.metrics_derived)
-			imw_finalize_metrics();
-
-		ImVec2 avail = ImGui::GetContentRegionAvail();
-		imw_handle_resize(avail);
-
-		/*  Reserve canvas. InvisibleButton handles click-to-focus.  */
-		ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
-		ImGui::InvisibleButton("##term_canvas", avail,
-		                       ImGuiButtonFlags_MouseButtonLeft  |
-		                       ImGuiButtonFlags_MouseButtonRight |
-		                       ImGuiButtonFlags_MouseButtonMiddle);
-
-		/*
-			Focus gate. IsItemFocused() reads the most recently
-			submitted item, so it MUST be called immediately after the
-			InvisibleButton; calling it after any other widget would
-			report that widget's state instead. Drive MODE_FOCUSED off
-			the result so xdrawcursor switches between solid and hollow
-			styles.
-
-			MODE_FOCUS is the separate, app-requested flag (DECSET
-			1004): when an app turns it on, the terminal sends \033[I
-			on focus gain and \033[O on focus loss. Edge-triggered
-			against imw_was_focused so the sequence only fires on
-			transitions, not every frame the focus state holds. tmux
-			uses this for `set -g focus-events on`; vim uses it for
-			autoread.
-		*/
-		/*  Second clause: test harnesses opt in via term_test_force_focus().  */
-		bool term_focused = ImGui::IsItemFocused() || imw_test_force_focus;
-		if (term_focused)
-			tw.mode |=  MODE_FOCUSED;
-		else
-			tw.mode &= ~MODE_FOCUSED;
-
-		if ((tw.mode & MODE_FOCUS) && term_focused != imw_was_focused)
-			ttywrite(term_focused ? "\033[I" : "\033[O", 3, 0);
-		imw_was_focused = term_focused;
-
-		/*
-			Set the per-frame render context for xclear / xdrawglyphfontspecs.
-			Two fields, by design — see ImwRenderCtx comment.
-		*/
-		imw_ctx.canvas_pos = canvas_pos;
-		imw_ctx.dl         = ImGui::GetWindowDrawList();
-
-		/*
-			Background fill for the entire canvas. Direct draw (not
-			cached): the canvas-wide fill isn't tied to any row, runs
-			every frame, and provides the backdrop for areas that the
-			row caches don't cover (mainly during a resize where new
-			rows haven't been recorded yet).
-
-			Under MODE_REVERSE the canvas inverts: default-bg slots
-			become default-fg, mirroring x.c's xclear (line 856)
-			which picks `defaultfg` vs `defaultbg` by IS_SET(MODE_REVERSE).
-		*/
-		{
-			ImU32 bg_col = colors[(tw.mode & MODE_REVERSE)
-			                       ? defaultfg : defaultbg];
-			ImVec2 bg_p1(canvas_pos.x + avail.x,
-			             canvas_pos.y + avail.y);
-			imw_ctx.dl->AddRectFilled(canvas_pos, bg_p1, bg_col);
-		}
-
-		/*  Drain whatever the shell has emitted since last frame.  */
-		imw_pump_pty();
-
-		/*
-			Tick the blink timer (toggles MODE_BLINK every blinktimeout ms
-			when any cell has ATTR_BLINK).
-		*/
-		imw_tick_blink();
-
-		/*  Keyboard input dispatch (focus-gated + KBDLOCK-gated).  */
-		if (term_focused && !(tw.mode & MODE_KBDLOCK))
-			imw_dispatch_keyboard();
-
-		/*  Mouse input dispatch — selection vs reporting, by mode.  */
-		imw_dispatch_mouse();
-
-		/*
-			Run a draw cycle: xdrawline writes per-row ops into the
-			cache, xdrawcursor writes the cursor into the per-frame
-			overlay. Phase B uses redraw() so all rows re-record each
-			frame (cache is exercised but no perf win yet); Phase C
-			will switch to draw() and lean on st.c's dirty-tracking
-			to skip clean rows.
-		*/
-		if (dc.metrics_derived)
-			redraw();
-
-		/*
-			Replay all row caches in row order, then the cursor
-			overlay on top. canvas_pos is added at replay time so a
-			window drag (which changes canvas_pos but doesn't dirty
-			any rows) doesn't invalidate the cache.
-		*/
-		for (size_t y = 0; y < imw_row_ops.size(); y++)
-			imw_replay_ops(imw_row_ops[y], canvas_pos, imw_ctx.dl);
-		imw_replay_ops(imw_overlay_ops, canvas_pos, imw_ctx.dl);
-	}
+	if (ImGui::Begin(label))
+		term_draw_canvas();
 	ImGui::End();
 }
 
@@ -2629,18 +2650,6 @@ term_shutdown(void)
 		time; the host owns that, not us. We don't free `dc.col[]` because
 		`colors[]` is a static array, not heap.
 	*/
-}
-
-/*
-	term_test_force_focus — make the focus gate treat the canvas as
-	focused so imw_dispatch_keyboard runs each frame. Call once before
-	the test's frame loop. Sticky for the lifetime of the process; real
-	binaries never call this.
-*/
-void
-term_test_force_focus(void)
-{
-	imw_test_force_focus = true;
 }
 
 /*

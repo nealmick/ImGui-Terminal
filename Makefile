@@ -185,10 +185,19 @@ LIBS_METAL += $(shell pkg-config --libs fontconfig freetype2)
 # .mm compilation. clang treats .mm as Objective-C++ by extension; the
 # rest of CXXFLAGS works as-is.
 $(BUILD_DIR)/%.o: %.mm | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) -fobjc-arc -Wno-deprecated-declarations -c -o $@ $<
+
+$(BUILD_DIR)/main.o: platform/OSX/main.mm | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -fobjc-arc -Wno-deprecated-declarations -c -o $@ $<
+
+$(BUILD_DIR)/imgui_impl_osx.o: $(IMGUI_DIR)/backends/imgui_impl_osx.mm | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -fobjc-arc -Wno-deprecated-declarations -c -o $@ $<
+
+$(BUILD_DIR)/imgui_impl_metal.o: $(IMGUI_DIR)/backends/imgui_impl_metal.mm | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -fobjc-arc -Wno-deprecated-declarations -c -o $@ $<
 
 $(BUILD_DIR)/%.o: $(IMGUI_DIR)/backends/%.mm | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) -fobjc-arc -Wno-deprecated-declarations -c -o $@ $<
 
 .PHONY: metal
 metal: $(EXE_METAL)
@@ -219,6 +228,7 @@ VULKAN_OBJS = $(addprefix $(BUILD_DIR)/, $(addsuffix .o, $(basename $(notdir $(V
 
 # Vulkan link libraries — cross-platform via pkg-config. Plus the
 # common GLFW + fontconfig + freetype the widget needs.
+ifneq (,$(filter vulkan,$(MAKECMDGOALS)))
 LIBS_VULKAN  = $(shell pkg-config --libs vulkan)
 LIBS_VULKAN += -L/usr/local/lib -L/opt/homebrew/lib -lglfw
 LIBS_VULKAN += $(shell pkg-config --libs fontconfig freetype2)
@@ -227,8 +237,9 @@ LIBS_VULKAN += $(shell pkg-config --libs fontconfig freetype2)
 # us the lib dir; embed it as an rpath so dyld/ld.so can resolve
 # libvulkan.1.dylib (or libvulkan.so) without LD_LIBRARY_PATH /
 # DYLD_LIBRARY_PATH gymnastics at run time.
-VULKAN_LIBDIR := $(shell pkg-config --variable=libdir vulkan)
+VULKAN_LIBDIR = $(shell pkg-config --variable=libdir vulkan)
 LIBS_VULKAN += -Wl,-rpath,$(VULKAN_LIBDIR)
+endif
 
 ifeq ($(UNAME_S), Darwin)
 	LIBS_VULKAN += -framework Cocoa -framework IOKit -framework CoreVideo
@@ -288,6 +299,39 @@ $(EXE_TEST_CORE): $(BUILD_DIR)/test_core.o  $(TEST_SHARED_OBJS) $(C_OBJS)
 
 $(EXE_TEST_INPUT): $(BUILD_DIR)/test_input.o $(TEST_SHARED_OBJS) $(C_OBJS)
 	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS_TEST)
+
+##---------------------------------------------------------------------
+## NATIVE OSX CLIENT — Cocoa + Metal
+##---------------------------------------------------------------------
+##
+## Same widget (imgui_win.cpp) and core (st.c) as the other targets.
+## Replaces GLFW with native Cocoa windowing and Metal rendering.
+##
+## Build: `make p_osx` →  $(BUILD_DIR)/imgui_terminal_osx
+
+EXE_P_OSX = $(BUILD_DIR)/imgui_terminal_osx
+
+P_OSX_SOURCES  = imgui_win.cpp platform/OSX/main.mm
+P_OSX_SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
+P_OSX_SOURCES += $(IMGUI_DIR)/backends/imgui_impl_osx.mm $(IMGUI_DIR)/backends/imgui_impl_metal.mm
+P_OSX_SOURCES += $(IMGUI_DIR)/misc/freetype/imgui_freetype.cpp
+
+P_OSX_OBJS = $(addprefix $(BUILD_DIR)/, $(addsuffix .o, $(basename $(notdir $(P_OSX_SOURCES)))))
+
+# Native Cocoa/Metal frameworks. GameController is required by
+# imgui_impl_osx.mm. fontconfig+freetype for the widget's font path.
+LIBS_P_OSX  = -framework Cocoa -framework Metal -framework MetalKit
+LIBS_P_OSX += -framework QuartzCore -framework GameController
+LIBS_P_OSX += -framework IOKit -framework CoreVideo
+LIBS_P_OSX += -L/usr/local/lib -L/opt/homebrew/lib
+LIBS_P_OSX += $(shell pkg-config --libs fontconfig freetype2)
+
+.PHONY: p_osx
+p_osx: $(EXE_P_OSX)
+	@echo Native OSX build complete
+
+$(EXE_P_OSX): $(P_OSX_OBJS) $(C_OBJS)
+	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS_P_OSX)
 
 clean:
 	rm -rf $(BUILD_DIR)
