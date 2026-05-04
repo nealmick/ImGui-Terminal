@@ -1,0 +1,122 @@
+name: mingw-test-suite
+
+on:
+  push:
+    branches: [main, windows]
+  pull_request:
+    branches: [main]
+
+# All run: steps below execute inside the MSYS2 MinGW64 shell. setup-msys2
+# installs the toolchain into a clean MSYS2 environment under
+# C:\msys64 and exports the MINGW64 environment so pkg-config / gcc /
+# bash all resolve from there. The shell key applies project-wide so
+# we don't repeat it on every step.
+defaults:
+  run:
+    shell: msys2 {0}
+
+jobs:
+  mingw:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # MSYS2 / MinGW64 toolchain + runtime libs:
+      #   toolchain    — gcc, g++, make, ld
+      #   glfw         — required for the default `make` target
+      #   freetype     — used by imgui_win.cpp's font loader
+      #   fontconfig   — font-name resolution (Consolas:pixelsize=...)
+      #   pkg-config   — Makefile uses pkg-config --cflags/--libs
+      #   diffutils    — `diff` for baseline comparisons (not in base)
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-glfw
+            mingw-w64-x86_64-freetype
+            mingw-w64-x86_64-fontconfig
+            mingw-w64-x86_64-pkg-config
+            diffutils
+
+      - name: Build default target (GLFW + OpenGL)
+        run: make
+
+      - name: Build test clients
+        run: make test_core test_input
+
+      # Each test below is its own step so the Actions UI shows pass/fail
+      # per test. `if: success() || failure()` lets every test run
+      # regardless of whether earlier tests passed.
+      #
+      # On Windows we prefer expected_win.json when present (mirrors the
+      # logic in tests/automation/*/runner.sh). Tests where no
+      # expected_win.json exists fall back to the shared expected.json.
+
+      # --- core suite ---
+      - name: core / attrs_basic
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/attrs_basic/input.sh --output /tmp/actual.json && diff -q tests/automation/core/attrs_basic/expected_win.json /tmp/actual.json
+      - name: core / colors_ansi_16
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/colors_ansi_16/input.sh --output /tmp/actual.json && diff -q tests/automation/core/colors_ansi_16/expected.json /tmp/actual.json
+      - name: core / colors_osc4
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/colors_osc4/input.sh --output /tmp/actual.json && diff -q tests/automation/core/colors_osc4/expected.json /tmp/actual.json
+      - name: core / colors_truecolor
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/colors_truecolor/input.sh --output /tmp/actual.json && diff -q tests/automation/core/colors_truecolor/expected.json /tmp/actual.json
+      - name: core / cursor_bar
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/cursor_bar/input.sh --output /tmp/actual.json && diff -q tests/automation/core/cursor_bar/expected.json /tmp/actual.json
+      - name: core / cursor_block
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/cursor_block/input.sh --output /tmp/actual.json && diff -q tests/automation/core/cursor_block/expected.json /tmp/actual.json
+      - name: core / cursor_underline
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/cursor_underline/input.sh --output /tmp/actual.json && diff -q tests/automation/core/cursor_underline/expected.json /tmp/actual.json
+      - name: core / hello
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/hello/input.sh --output /tmp/actual.json && diff -q tests/automation/core/hello/expected.json /tmp/actual.json
+      - name: core / wide_cjk
+        if: success() || failure()
+        run: ./build/test_core --input tests/automation/core/wide_cjk/input.sh --output /tmp/actual.json && diff -q tests/automation/core/wide_cjk/expected.json /tmp/actual.json
+
+      # --- input suite (every test uses expected_win.json on Windows) ---
+      - name: input / arrow_line_edit
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/arrow_line_edit/events.txt --output /tmp/actual.json && diff -q tests/automation/input/arrow_line_edit/expected_win.json /tmp/actual.json
+      - name: input / backspace_edit
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/backspace_edit/events.txt --output /tmp/actual.json && diff -q tests/automation/input/backspace_edit/expected_win.json /tmp/actual.json
+      - name: input / clipboard_paste
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/clipboard_paste/events.txt --output /tmp/actual.json && diff -q tests/automation/input/clipboard_paste/expected_win.json /tmp/actual.json
+      - name: input / ctrl_c_interrupt
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/ctrl_c_interrupt/events.txt --output /tmp/actual.json && diff -q tests/automation/input/ctrl_c_interrupt/expected_win.json /tmp/actual.json
+      - name: input / type_hello
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/type_hello/events.txt --output /tmp/actual.json && diff -q tests/automation/input/type_hello/expected_win.json /tmp/actual.json
+      - name: input / utf8_typing
+        if: success() || failure()
+        run: ./build/test_input --events tests/automation/input/utf8_typing/events.txt --output /tmp/actual.json && diff -q tests/automation/input/utf8_typing/expected_win.json /tmp/actual.json
+
+      # If any test fails, upload the actual.json + the diff so we can
+      # inspect what diverged on the CI runner vs the local baseline.
+      # Only fires when at least one of the previous test steps failed.
+      - name: Upload diagnostic artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mingw-test-failures
+          path: |
+            /tmp/actual.json
+            build/imgui_terminal.exe
+            build/test_core.exe
+            build/test_input.exe
+          retention-days: 7

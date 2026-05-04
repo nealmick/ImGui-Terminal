@@ -13,6 +13,12 @@ dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd -- "$dir/../../.." && pwd)
 client="$repo/build/test_input"
 
+_uname=$(uname -s)
+case "$_uname" in
+	MINGW*|MSYS*|CYGWIN*) _is_win=1 ;;
+	*)                     _is_win=0 ;;
+esac
+
 if [ ! -x "$client" ]; then
 	echo "test_input not built — run 'make test_input' first" >&2
 	exit 2
@@ -31,14 +37,31 @@ for tdir in "$dir"/*/; do
 
 	name=$(basename "$tdir")
 	actual="$tdir/actual.json"
-	expected="$tdir/expected.json"
+	# Platform-specific baselines: prefer expected_win.json on Windows
+	# if it exists, otherwise fall back to expected.json (unified).
+	if [ "$_is_win" = "1" ] && [ -f "$tdir/expected_win.json" ]; then
+		expected="$tdir/expected_win.json"
+	else
+		expected="$tdir/expected.json"
+	fi
 
-	"$client" --events "$tdir/events.txt" --output "$actual" >/dev/null 2>&1
+	if [ "$_is_win" = "1" ]; then
+		"$client" --events "$tdir/events.txt" --output "$actual" 2>/dev/null
+	else
+		"$client" --events "$tdir/events.txt" --output "$actual" >/dev/null 2>&1
+	fi
 
 	if [ ! -f "$expected" ]; then
-		printf '\033[33mMISSING\033[0m  %s — no expected.json yet\n' "$name"
-		printf '         to baseline: cp %s %s\n' "$actual" "$expected"
-		missing=$((missing + 1))
+		if [ "$update" = "1" ] && [ -f "$actual" ]; then
+			create_target="$expected"
+			[ "$_is_win" = "1" ] && create_target="$tdir/expected_win.json"
+			cp "$actual" "$create_target"
+			printf '\033[32mCREATED\033[0m  %s — %s written\n' "$name" "$(basename "$create_target")"
+			pass=$((pass + 1))
+		else
+			printf '\033[33mMISSING\033[0m  %s — no %s yet\n' "$name" "$(basename "$expected")"
+			missing=$((missing + 1))
+		fi
 		continue
 	fi
 
@@ -50,14 +73,18 @@ for tdir in "$dir"/*/; do
 		fails+=("$name")
 		fail=$((fail + 1))
 		if [ "$update" = "1" ]; then
-			cp "$actual" "$expected"
-			printf '         updated expected.json\n'
+			update_target="$expected"
+			[ "$_is_win" = "1" ] && update_target="$tdir/expected_win.json"
+			cp "$actual" "$update_target"
+			printf '         updated %s\n' "$(basename "$update_target")"
 		fi
 	fi
 done
 
 echo
 printf 'pass:%d  fail:%d  missing:%d\n' "$pass" "$fail" "$missing"
+[ -n "${SUMMARY_FILE:-}" ] && \
+	printf 'pass:%d  fail:%d  missing:%d\n' "$pass" "$fail" "$missing" > "$SUMMARY_FILE"
 
 if [ "$fail" -gt 0 ] && [ "$update" = "0" ]; then
 	echo

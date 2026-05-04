@@ -1,0 +1,18 @@
+# Force LF line endings for all text files to keep byte-level test
+# baselines stable across platforms. Without this, Windows checkouts
+# with core.autocrlf=true would convert expected_win.json from LF to
+# CRLF, while the test binaries (fopen "wb") always write LF — the
+# resulting diff would fail on every test run.
+
+* text=auto eol=lf
+
+# Binary asset types we never want touched
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.ttf  binary
+*.otf  binary
+*.dll  binary
+*.exe  binary

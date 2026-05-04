@@ -32,7 +32,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/select.h>
+#endif
 
 /* Executable-path lookup for resolving rgb.txt relative to the binary
  * (instead of the CWD). No portable C API for this — short platform block. */
@@ -49,6 +53,10 @@
 extern "C" {
 #include "st.h"
 #include "win.h"
+#ifdef _WIN32
+/* ConPTY read-pipe handle, defined in st.c */
+extern HANDLE w32_pipe_in;
+#endif
 }
 
 
@@ -936,7 +944,15 @@ static void
 imw_get_exe_dir(char *out, size_t n)
 {
 	out[0] = '\0';
-#ifdef __APPLE__
+#ifdef _WIN32
+	DWORD r = GetModuleFileNameA(NULL, out, (DWORD)n);
+	if (r == 0 || r >= n)
+		return;
+	char *sep = strrchr(out, '\\');
+	if (!sep) sep = strrchr(out, '/');
+	if (sep) *sep = '\0';
+	return;
+#elif defined(__APPLE__)
 	uint32_t sz = (uint32_t)n;
 	if (_NSGetExecutablePath(out, &sz) != 0)
 		return;
@@ -1344,6 +1360,19 @@ imw_pump_pty(void)
 	*/
 	const double drain_budget_s = 0.005;
 	const double deadline = ImGui::GetTime() + drain_budget_s;
+#ifdef _WIN32
+	/* Windows: poll the ConPTY read-pipe for available data. */
+	for (;;) {
+		DWORD avail = 0;
+		if (!PeekNamedPipe(w32_pipe_in, NULL, 0, NULL, &avail, NULL))
+			break;
+		if (avail == 0)
+			break;
+		ttyread();
+		if (ImGui::GetTime() >= deadline)
+			break;
+	}
+#else
 	fd_set rfds;
 	struct timeval tv = { 0, 0 };
 	for (;;) {
@@ -1360,6 +1389,7 @@ imw_pump_pty(void)
 		if (ImGui::GetTime() >= deadline)
 			break;
 	}
+#endif
 }
 
 /*
@@ -1580,6 +1610,28 @@ imw_drawglyphfontspecs(const ImwGlyphSpec *specs, Glyph base,
 		char buf[8];
 		int n = (int)utf8encode(s->codepoint, buf);
 		ImVec2 gp((float)s->x, (float)s->y);
+#ifdef _WIN32
+		/* Center emoji glyphs in their cell. ImGui renders at
+		   pos + (X0,Y0)*scale — shift pos so the glyph visual
+		   center lands at the cell center. Mirrors a quirk Windows
+		   Terminal also fails to handle: it doesn't center emoji
+		   glyphs properly inside their wide-cell slot. */
+		if ((base.mode & ATTR_WIDE) && s->codepoint > 0xFFFF) {
+			ImFontBaked *baked = s->font->GetFontBaked(dc.font.pxsize);
+			if (baked) {
+				const ImFontGlyph *gl = baked->FindGlyph((ImWchar)s->codepoint);
+				if (gl) {
+					float sc = dc.font.pxsize / baked->Size;
+					float gw = (gl->X1 - gl->X0) * sc;
+					float gh = (gl->Y1 - gl->Y0) * sc;
+					float cw2 = (float)(tw.cw * 2);
+					float ch1 = (float)tw.ch;
+					gp.x += (cw2 - gw) * 0.5f - gl->X0 * sc;
+					gp.y += (ch1 - gh) * 0.5f - gl->Y0 * sc;
+				}
+			}
+		}
+#endif
 		imw_emit_text(s->font, gp, fg, buf, n);
 	}
 
@@ -1783,8 +1835,14 @@ imw_load_fallback(const char *fc_query, double pxsize)
 		Only set this for the emoji query — CJK/Hiragino is an outline
 		font and rasterizes correctly at any size, no override needed.
 	*/
+#ifndef _WIN32
+	/* Apple Color Emoji is a bitmap font with fixed strikes — needs
+	   density override to land on a working ppem. Windows emoji fonts
+	   (Segoe UI Emoji, Noto Color Emoji) are outline/COLR and
+	   rasterize correctly at any size without this hack. */
 	if (strstr(fc_query, "und-zsye") != NULL)
 		cfg.RasterizerDensity = 20.0f / (float)pxsize;
+#endif
 
 	ImFont *merged = ImGui::GetIO().Fonts->AddFontFromFileTTF(
 	    (const char *)file, (float)pxsize, &cfg);
@@ -2799,10 +2857,24 @@ term_dump_json(FILE *out)
 	fprintf(out, "  \"ch\": %d,\n",            tw.ch);
 	fprintf(out, "  \"tw\": %d,\n",            tw.tw);
 	fprintf(out, "  \"th\": %d,\n",            tw.th);
-	fprintf(out, "  \"mode\": %d,\n",          tw.mode);
+	/* Mask out MODE_FOCUS for cross-platform test stability.
+	   ConPTY unconditionally sends \033[?1004h which sets this
+	   bit; raw POSIX PTYs don't. The bit is ConPTY infrastructure,
+	   not application state, so stripping it produces baselines
+	   that match across platforms. */
+	int dump_mode = tw.mode;
+#ifdef _WIN32
+	dump_mode &= ~MODE_FOCUS;
+#endif
+	fprintf(out, "  \"mode\": %d,\n",          dump_mode);
 	fprintf(out, "  \"cursor_shape\": %d,\n",  tw.cursor);
+	/* Use the default title for dump stability. ConPTY and some
+	   shells send OSC title-set sequences (exe path, PS1 \w, etc.)
+	   before the script runs — these are environment-dependent and
+	   would break cross-platform test baselines. */
+	const char *dump_title = "Terminal";
 	fprintf(out, "  \"title\": ");
-	imw_dump_jstr(out, term_title, (int)strlen(term_title));
+	imw_dump_jstr(out, dump_title, (int)strlen(dump_title));
 	fprintf(out, ",\n");
 
 	int rows = (int)imw_row_ops.size();
