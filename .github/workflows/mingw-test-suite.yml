@@ -24,7 +24,10 @@ jobs:
           submodules: recursive
 
       # MSYS2 / MinGW64 toolchain + runtime libs:
-      #   toolchain    — gcc, g++, make, ld
+      #   toolchain    — gcc, g++, ld (group)
+      #   make         — GNU make as `make`. The toolchain group ships
+      #                  `mingw32-make` only, but our Makefile is invoked
+      #                  via `make`, so install the standalone package.
       #   glfw         — required for the default `make` target
       #   freetype     — used by imgui_win.cpp's font loader
       #   fontconfig   — font-name resolution (Consolas:pixelsize=...)
@@ -36,6 +39,7 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
+            make
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-glfw
             mingw-w64-x86_64-freetype
