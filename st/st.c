@@ -996,7 +996,16 @@ execsh(char *cmd, char **args)
 		prog = sh;
 		arg = NULL;
 	}
-	DEFAULT(args, ((char *[]) {prog, arg, NULL}));
+
+	/* Spawn the child as a login shell (argv[0] = "-shellname") so
+	   ~/.zprofile / .bash_profile is sourced. macOS GUI-launched apps
+	   inherit launchd's minimal PATH; the login shell is what populates
+	   it. Matches Terminal.app, iTerm2, Alacritty default behavior. */
+	const char *base = strrchr(prog, '/');
+	base = base ? base + 1 : prog;
+	char argv0[256];
+	snprintf(argv0, sizeof argv0, "-%s", base);
+	DEFAULT(args, ((char *[]) {argv0, arg, NULL}));
 
 	unsetenv("COLUMNS");
 	unsetenv("LINES");

@@ -1578,7 +1578,27 @@ imw_drawglyphfontspecs(const ImwGlyphSpec *specs, Glyph base,
 		Without this, gutters at the edges keep the canvas-wide default
 		bg and don't follow per-cell bg variations. Done BEFORE the cell
 		bg fill so the gutter and cell agree.
+
+		Right/bottom gutters end at the canonical gutter edge
+		(borderpx past the cell grid), NOT at the canvas edge — when
+		the canvas is resized so the cell grid doesn't tile it exactly,
+		any leftover beyond the gutter is "no-cell zone" and must keep
+		the canvas-default bg. Without this clamp, a block/underline
+		cursor on the last row (or last column) paints its color into
+		the leftover region, visibly extending past the cell.
 	*/
+	/*
+		Canonical gutter end is borderpx past the cell grid. Clamp by the
+		actual canvas dimension: in test fixtures tw.w == tw.tw (no real
+		canvas border), so falling back to tw.w preserves byte-for-byte
+		test golden output. In the live UI tw.w is the ImGui-given canvas
+		size; when oversized past canon, we still stop at canon so the
+		leftover stays canvas-default bg.
+	*/
+	const int gutter_right  = (tw.w < borderpx + tw.tw + borderpx)
+	                          ? tw.w : borderpx + tw.tw + borderpx;
+	const int gutter_bottom = (tw.h < borderpx + tw.th + borderpx)
+	                          ? tw.h : borderpx + tw.th + borderpx;
 	if (x == 0)  /*  left gutter  */
 		imw_clear(0,
 		           (y == 0) ? 0 : winy,
@@ -1587,12 +1607,12 @@ imw_drawglyphfontspecs(const ImwGlyphSpec *specs, Glyph base,
 	if (winx + width >= borderpx + tw.tw)  /*  right gutter  */
 		imw_clear(winx + width,
 		           (y == 0) ? 0 : winy,
-		           tw.w,
+		           gutter_right,
 		           winy + tw.ch, bg);
 	if (y == 0)  /*  top gutter  */
 		imw_clear(winx, 0, winx + width, borderpx, bg);
 	if (winy + tw.ch >= borderpx + tw.th)  /*  bottom gutter  */
-		imw_clear(winx, winy + tw.ch, winx + width, tw.h, bg);
+		imw_clear(winx, winy + tw.ch, winx + width, gutter_bottom, bg);
 
 	/*  Cell bg fill — coords widget-relative; replay adds canvas_pos.  */
 	ImVec2 p0((float)winx, (float)winy);

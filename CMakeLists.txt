@@ -332,7 +332,7 @@ endif()
 # is genuinely renderer- and host-agnostic.
 
 if(APPLE)
-    add_executable(p_osx
+    add_executable(p_osx MACOSX_BUNDLE
         ${IMW_WIDGET}
         ${IMW_IMGUI_CORE}
         "${IMGUI_DIR}/backends/imgui_impl_osx.mm"
@@ -340,11 +340,27 @@ if(APPLE)
         "${CMAKE_SOURCE_DIR}/platform/OSX/main.mm"
     )
     imw_configure_target(p_osx)
+    set_target_properties(p_osx PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST       "${CMAKE_SOURCE_DIR}/platform/OSX/Info.plist.in"
+        MACOSX_BUNDLE_GUI_IDENTIFIER   "org.suckless.imgui-terminal"
+        MACOSX_BUNDLE_BUNDLE_NAME      "ImGui Terminal"
+        MACOSX_BUNDLE_BUNDLE_VERSION   "0.9.3"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "0.9.3"
+    )
     target_link_libraries(p_osx PRIVATE
         ${IMW_FREETYPE_TARGET}
         ${IMW_FONTCONFIG_TARGET}
         "-framework Cocoa"   "-framework Metal"   "-framework MetalKit"
         "-framework QuartzCore" "-framework GameController"
         "-framework IOKit"   "-framework CoreVideo"
+    )
+    # rgb.txt resolution: imgui_win.cpp searches <exe_dir>/rgb.txt as one
+    # of its fallbacks. Drop a copy beside the binary inside the bundle
+    # so the GUI-launched app (CWD=/) finds it without widget changes.
+    add_custom_command(TARGET p_osx POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_SOURCE_DIR}/rgb.txt"
+            "$<TARGET_BUNDLE_CONTENT_DIR:p_osx>/MacOS/rgb.txt"
+        VERBATIM
     )
 endif()

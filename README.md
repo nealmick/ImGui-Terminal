@@ -13,8 +13,8 @@ anything — wherever ImGui runs this terminal runs.
 ## Build
 
 CMake 3.21+ and a **C++20 compiler** (gcc 10+, clang 10+, Apple clang
-12+ / Xcode 12+, MSVC 19.29+ / VS 2019 16.10+). Requires GLFW,
-fontconfig, and freetype.
+12+ / Xcode 12+, MSVC 19.29+ / VS 2019 16.10+). Requires fontconfig
+and freetype.
 
 ### Windows (MSVC)
 
