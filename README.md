@@ -16,16 +16,6 @@ CMake 3.21+ and a **C++20 compiler** (gcc 10+, clang 10+, Apple clang
 12+ / Xcode 12+, MSVC 19.29+ / VS 2019 16.10+). Requires GLFW,
 fontconfig, and freetype.
 
-### Linux / macOS
-
-Install deps via your package manager (apt, brew, etc.), then:
-
-```sh
-cmake -B build -S .
-cmake --build build
-./build/imgui_terminal
-```
-
 ### Windows (MSVC)
 
 Visual Studio 2019+. Clone vcpkg into the repo once and bootstrap it;
@@ -50,6 +40,20 @@ cmake -B build -S .
 cmake --build build
 ./build/imgui_terminal
 ```
+
+### Linux / macOS
+
+Install deps via your package manager (apt, brew, etc.), then:
+
+```sh
+cmake -B build -S .
+cmake --build build
+./build/imgui_terminal
+```
+
+On macOS, launch with `open ./build/imgui_terminal` direct exec from
+terminal can't grab keyboard focus on macOS 26 + GLFW 3.4.
+
 
 ### Alternative renderers / native clients
 
