@@ -53,33 +53,12 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      # Test EXECUTION is intentionally NOT run on CI.
-      #
-      # The test binaries spawn an MSYS2 bash through a ConPTY we set
-      # up in st.c. That works when the parent is mintty (a real pty
-      # provided by the MSYS2 runtime), but fails when the parent is
-      # cmd.exe / PowerShell pipes — MSYS2 bash bypasses our ConPTY
-      # and writes straight to the inherited handles, leaving the
-      # rendered grid blank in our dump.
-      #
-      # GitHub Actions runners only invoke commands via cmd.exe /
-      # PowerShell pipes; there is no mintty-equivalent shell mode.
-      # CI therefore verifies the port still BUILDS cleanly (real
-      # coverage against compiler / library / API regressions) and
-      # leaves test execution to local mintty runs:
-      #
-      #   pacman -S make cmake mingw-w64-x86_64-toolchain ...
-      #   cmake -B build -S . && cmake --build build
-      #   ./tests/automation/run_tests.sh
-
-      # Upload the built binaries so anyone reviewing a CI run can grab
-      # a Windows build (production + tests) without setting up MSYS2.
+      # Upload the built binary so anyone reviewing a CI run can grab
+      # a Windows build without setting up MSYS2.
       - name: Upload built binaries
         uses: actions/upload-artifact@v4
         with:
           name: mingw-binaries
           path: |
             build/imgui_terminal.exe
-            build/test_core.exe
-            build/test_input.exe
           retention-days: 14

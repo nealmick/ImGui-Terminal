@@ -21,17 +21,20 @@ input_log=$(mktemp)
 trap 'rm -f "$core_log" "$input_log"' EXIT
 
 printf '\033[1;34m== core ==\033[0m\n'
-SUMMARY_FILE="$core_log" "$dir/core/runner.sh" "$@"
-rc_core=$?
+"$dir/core/runner.sh" "$@" 2>&1 | tee "$core_log"
+rc_core=${PIPESTATUS[0]}
 
 echo
 printf '\033[1;34m== input ==\033[0m\n'
-SUMMARY_FILE="$input_log" "$dir/input/runner.sh" "$@"
-rc_input=$?
+"$dir/input/runner.sh" "$@" 2>&1 | tee "$input_log"
+rc_input=${PIPESTATUS[0]}
 
+# Pull the "pass:N  fail:N  missing:N" line out of each log. If a suite
+# crashed before printing the summary the field defaults to 0 — the
+# non-zero exit code from the runner still propagates below.
 extract() {
 	local log=$1 field=$2
-	grep -oE "${field}:[0-9]+" "$log" 2>/dev/null | tail -1 | grep -oE '[0-9]+'
+	grep -oE "${field}:[0-9]+" "$log" | tail -1 | grep -oE '[0-9]+'
 }
 
 core_pass=$(extract "$core_log" pass);    core_pass=${core_pass:-0}

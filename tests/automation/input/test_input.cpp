@@ -56,9 +56,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
-#include <unistd.h>     /* usleep — Windows path uses Sleep() instead */
-#endif
+#include <unistd.h>
 #include <vector>
 #include <string>
 
@@ -373,7 +371,7 @@ dump_atexit(void)
 {
 	if (!g_output_path) return;
 	redraw();
-	FILE *f = fopen(g_output_path, "wb");
+	FILE *f = fopen(g_output_path, "w");
 	if (!f) {
 		fprintf(stderr, "test_input: fopen %s: %s\n",
 		    g_output_path, strerror(errno));
@@ -444,9 +442,7 @@ main(int argc, char **argv)
 		io.Fonts->GetTexDataAsRGBA32(&pix, &w, &h);
 	}
 
-#ifndef _WIN32
 	signal(SIGCHLD, SIG_IGN);
-#endif
 
 	/*  Run a few extra drain frames after the last scheduled event so
 	    bash has time to echo the final keystroke before the dump.  */
@@ -469,22 +465,14 @@ main(int argc, char **argv)
 		term_draw_canvas();
 		ImGui::End();
 		ImGui::EndFrame();
-#ifdef _WIN32
-		Sleep(20);     /*  20ms — ConPTY + MSYS2 bash needs more time  */
-#else
 		usleep(2000);  /*  ~2ms — let bash echo back  */
-#endif
 	}
 
 	/*  Final drain after the loop: keep reading until the PTY is
 	    quiet for ~50ms. Mirrors the core client's child-exit drain
 	    but we never quit bash so there's no EOF.  */
 	for (int i = 0; i < 25; i++) {
-#ifdef _WIN32
-		Sleep(20);
-#else
 		usleep(2000);
-#endif
 		ImGui::NewFrame();
 		/*  Match the geometry term_draw_widget() used to create so the
 		    expected.json snapshots stay valid: 800x500 with default

@@ -18,7 +18,7 @@
 #
 # Targets:
 #   imgui_terminal           — default GLFW + OpenGL host (always built)
-#   test_core, test_input    — headless test harnesses (always built)
+#   test_core, test_input    — headless test harnesses (POSIX only)
 #   imgui_terminal_metal     — Metal renderer host (macOS only)
 #   imgui_terminal_vulkan    — Vulkan renderer host (built only if SDK found)
 #   p_osx                    — native macOS Cocoa+Metal client (macOS only)
@@ -248,23 +248,29 @@ endif()
 # Same emulator + widget as the production binaries; the harness main
 # replaces the host shell. fontconfig + freetype are still needed
 # because imgui_win.cpp's font loader uses them.
+#
+# POSIX only. The harness sources use forkpty / openpty / SIGCHLD /
+# unistd.h directly with no Windows abstractions; on Windows the
+# build CI just produces the GLFW app, not the harness binaries.
 
-foreach(harness IN ITEMS core input)
-    set(t "test_${harness}")
-    add_executable(${t}
-        ${IMW_WIDGET}
-        ${IMW_IMGUI_CORE}
-        "${CMAKE_SOURCE_DIR}/tests/automation/${harness}/${t}.cpp"
-    )
-    imw_configure_target(${t})
-    target_link_libraries(${t} PRIVATE
-        ${IMW_FREETYPE_TARGET}
-        ${IMW_FONTCONFIG_TARGET}
-    )
-    if(UNIX AND NOT APPLE)
-        target_link_libraries(${t} PRIVATE util)   # forkpty/openpty
-    endif()
-endforeach()
+if(NOT WIN32)
+    foreach(harness IN ITEMS core input)
+        set(t "test_${harness}")
+        add_executable(${t}
+            ${IMW_WIDGET}
+            ${IMW_IMGUI_CORE}
+            "${CMAKE_SOURCE_DIR}/tests/automation/${harness}/${t}.cpp"
+        )
+        imw_configure_target(${t})
+        target_link_libraries(${t} PRIVATE
+            ${IMW_FREETYPE_TARGET}
+            ${IMW_FONTCONFIG_TARGET}
+        )
+        if(UNIX AND NOT APPLE)
+            target_link_libraries(${t} PRIVATE util)   # forkpty/openpty
+        endif()
+    endforeach()
+endif()
 
 #====================================================================
 # Metal renderer host (macOS only)

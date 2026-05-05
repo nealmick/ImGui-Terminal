@@ -60,7 +60,7 @@ dump_atexit(void)
 	/*  Final redraw() so imw_row_ops reflects the post-processing
 	    state of Term, not whatever was cached partway through.  */
 	redraw();
-	FILE *f = fopen(g_output_path, "wb");
+	FILE *f = fopen(g_output_path, "w");
 	if (!f) {
 		fprintf(stderr, "test_core: fopen %s: %s\n",
 		    g_output_path, strerror(errno));
@@ -114,10 +114,8 @@ main(int argc, char **argv)
 
 	term_init(80, 24, child_argv);
 
-#ifndef _WIN32
 	/*  Override st.c's SIGCHLD handler. See file header for why.  */
 	signal(SIGCHLD, SIG_IGN);
-#endif
 
 	/*  Pump until ttyread() hits EOF and calls exit(0) — which fires
 	    dump_atexit. This loop never returns normally.  */

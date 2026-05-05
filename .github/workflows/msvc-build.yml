@@ -64,7 +64,5 @@ jobs:
           name: msvc-binaries
           path: |
             build/imgui_terminal.exe
-            build/test_core.exe
-            build/test_input.exe
             build/*.dll
           retention-days: 14
