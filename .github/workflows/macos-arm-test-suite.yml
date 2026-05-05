@@ -2,7 +2,7 @@ name: macos-arm-test-suite
 
 on:
   push:
-    branches: [main]
+    branches: [main, windows]
   pull_request:
     branches: [main]
 
@@ -14,20 +14,22 @@ jobs:
         with:
           submodules: recursive
 
-      # bash 5 (homebrew) — test_setup.h's find_bash() prefers
-      # /opt/homebrew/bin/bash; baselines were generated against bash 5,
-      # not the macOS-shipped 3.2 at /bin/bash.
-      # glfw — required for the default `make` target (GLFW + OpenGL3 host).
-      # fontconfig + freetype — required by imgui_win.cpp's font loader,
-      # used by both production and test binaries.
+      # cmake     — driver; runner ships an older one but we want the
+      #             same minimum used elsewhere in CI.
+      # pkg-config — needed by CMake's find_package(PkgConfig) on POSIX.
+      # bash 5     — test_setup.h's find_bash() prefers /opt/homebrew/bin/bash;
+      #             baselines were generated against bash 5, not the
+      #             macOS-shipped 3.2 at /bin/bash.
+      # glfw, fontconfig, freetype — runtime libs imgui_win.cpp uses for
+      #             windowing and font discovery / rasterization.
       - name: Install dependencies
-        run: brew install bash glfw fontconfig freetype
+        run: brew install cmake pkg-config bash glfw fontconfig freetype
 
-      - name: Build default target (GLFW + OpenGL)
-        run: make
+      - name: Configure
+        run: cmake -B build -S .
 
-      - name: Build test clients
-        run: make test_core test_input
+      - name: Build all targets
+        run: cmake --build build --parallel
 
       # Each test below is its own step so the Actions UI shows pass/fail
       # per test. `if: success() || failure()` lets every test run

@@ -131,13 +131,17 @@ endif()
 #--------------------------------------------------------------------
 # Dependencies
 #--------------------------------------------------------------------
-# Windows uses vcpkg manifest mode (vcpkg.json next to this file).
-# POSIX uses pkg-config. Both produce IMPORTED targets we link against
-# uniformly via the IMW_*_TARGET variables.
+# MSVC uses vcpkg manifest mode (vcpkg.json next to this file) and
+# resolves via CONFIG mode find_package. Everything else — Linux,
+# macOS, AND MinGW (which ships MSYS2 pkg-config) — uses pkg-config.
+# We gate on MSVC, not WIN32, because WIN32 is true for both MSVC
+# and MinGW but they need different dep-resolution paths. Both
+# branches produce IMPORTED targets we link against uniformly via
+# the IMW_*_TARGET variables.
 
 set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/imgui")
 
-if(WIN32)
+if(MSVC)
     find_package(glfw3      CONFIG REQUIRED)
     find_package(freetype   CONFIG REQUIRED)
     find_package(Fontconfig REQUIRED)         # Module mode (vcpkg ports it without a CONFIG file)

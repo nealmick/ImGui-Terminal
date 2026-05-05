@@ -625,11 +625,13 @@ imw_loadcols(void)
 {
 	imw_load_rgb_db();
 	for (int i = 0; i < IMW_COLORS_LEN; i++) {
-		ImU32 c;
 		/*
 			NULL name -> derive from index (mirrors x.c xloadcolor's
-			"no name" path).
+			"no name" path). c is zero-init to quiet a false
+			-Wmaybe-uninitialized at -O2+; imw_resolve_color_at
+			always writes c on success and we die() on failure.
 		*/
+		ImU32 c = 0;
 		if (!imw_resolve_color_at(i, NULL, &c))
 			die("imgui_win: cannot derive color slot %d\n", i);
 		colors[i] = c;
