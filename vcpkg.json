@@ -1,0 +1,10 @@
+{
+  "name": "imgui-terminal",
+  "version-string": "0.1.0",
+  "description": "Cross-platform ImGui-Terminal Emulator",
+  "dependencies": [
+    "glfw3",
+    "freetype",
+    "fontconfig"
+  ]
+}

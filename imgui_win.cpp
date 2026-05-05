@@ -119,19 +119,24 @@ typedef struct {
 	printscreen, printsel, toggleprinter) are already declared in st.h.
 
 	zoom/zoomabs/zoomreset are stubs reserved for font-reload-on-zoom.
-	They're not currently referenced by the shortcuts[] array
-	(omitted to avoid C++11 designated-initializer-for-union friction),
-	but the prototypes stay so the bodies below have something to declare
-	— `unused` attribute keeps -Wall quiet until they're wired in.
+	They're not currently referenced by the shortcuts[] array, but the
+	prototypes stay so the bodies below have something to declare —
+	IMW_UNUSED keeps -Wall quiet until they're wired in. MSVC has no
+	equivalent attribute in this position, so the macro is empty there.
 */
+#if defined(__GNUC__) || defined(__clang__)
+#define IMW_UNUSED __attribute__((unused))
+#else
+#define IMW_UNUSED
+#endif
 static void clipcopy(const Arg *);
 static void clippaste(const Arg *);
 static void selpaste(const Arg *);
 static void numlock(const Arg *);
-static void zoom(const Arg *)      __attribute__((unused));
-static void zoomabs(const Arg *)   __attribute__((unused));
-static void zoomreset(const Arg *) __attribute__((unused));
-static void ttysend(const Arg *)   __attribute__((unused));
+static void zoom(const Arg *)      IMW_UNUSED;
+static void zoomabs(const Arg *)   IMW_UNUSED;
+static void zoomreset(const Arg *) IMW_UNUSED;
+static void ttysend(const Arg *)   IMW_UNUSED;
 
 /*
 	Adapter config — provides storage for st.h's externs (utmp, tabspaces,

@@ -27,7 +27,12 @@
 #include <windows.h>
 #include <process.h>
 #include <io.h>
-#include <sys/types.h>     /* pid_t, ssize_t already defined by MinGW */
+#include <sys/types.h>     /* pid_t (only used in POSIX paths) */
+#ifdef _MSC_VER
+/* MSVC's <sys/types.h> doesn't define ssize_t. SSIZE_T (uppercase)
+   comes from <BaseTsd.h>, included transitively by <windows.h>. */
+typedef SSIZE_T ssize_t;
+#endif
 #else
 #include <pwd.h>
 #include <signal.h>

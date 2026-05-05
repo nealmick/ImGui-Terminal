@@ -37,6 +37,12 @@
 #endif
 #define chdir  _chdir
 #define getcwd _getcwd
+/* MSVC's case-insensitive string compare is _stricmp; POSIX is
+   strcasecmp. MinGW provides strcasecmp via <strings.h>, but pinning
+   the macro here keeps the test sources free of compiler ifdefs. */
+#ifdef _MSC_VER
+#define strcasecmp _stricmp
+#endif
 #ifndef PATH_MAX
 #define PATH_MAX MAX_PATH
 #endif

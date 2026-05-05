@@ -1,0 +1,85 @@
+name: mingw-build
+
+on:
+  push:
+    branches: [main, windows]
+  pull_request:
+    branches: [main]
+
+# All run: steps below execute inside the MSYS2 MinGW64 shell. setup-msys2
+# installs the toolchain into a clean MSYS2 environment under
+# C:\msys64 and exports the MINGW64 environment so pkg-config / gcc /
+# bash all resolve from there. The shell key applies project-wide so
+# we don't repeat it on every step.
+defaults:
+  run:
+    shell: msys2 {0}
+
+jobs:
+  mingw:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # MSYS2 / MinGW64 toolchain + runtime libs:
+      #   toolchain    — gcc, g++, ld, ar (group)
+      #   make         — needed by the "MSYS Makefiles" CMake generator
+      #   cmake        — driver; Configure/Build steps below invoke it
+      #   glfw         — required for the default `imgui_terminal` target
+      #   freetype     — used by imgui_win.cpp's font loader
+      #   fontconfig   — font-name resolution (Consolas:pixelsize=...)
+      #   pkg-config   — CMake's find_package(PkgConfig) uses it on POSIX
+      #   diffutils    — kept for the local-mintty test workflow
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-glfw
+            mingw-w64-x86_64-freetype
+            mingw-w64-x86_64-fontconfig
+            mingw-w64-x86_64-pkg-config
+            diffutils
+
+      - name: Configure
+        run: cmake -B build -S . -G "MSYS Makefiles"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      # Test EXECUTION is intentionally NOT run on CI.
+      #
+      # The test binaries spawn an MSYS2 bash through a ConPTY we set
+      # up in st.c. That works when the parent is mintty (a real pty
+      # provided by the MSYS2 runtime), but fails when the parent is
+      # cmd.exe / PowerShell pipes — MSYS2 bash bypasses our ConPTY
+      # and writes straight to the inherited handles, leaving the
+      # rendered grid blank in our dump.
+      #
+      # GitHub Actions runners only invoke commands via cmd.exe /
+      # PowerShell pipes; there is no mintty-equivalent shell mode.
+      # CI therefore verifies the port still BUILDS cleanly (real
+      # coverage against compiler / library / API regressions) and
+      # leaves test execution to local mintty runs:
+      #
+      #   pacman -S make cmake mingw-w64-x86_64-toolchain ...
+      #   cmake -B build -S . && cmake --build build
+      #   ./tests/automation/run_tests.sh
+
+      # Upload the built binaries so anyone reviewing a CI run can grab
+      # a Windows build (production + tests) without setting up MSYS2.
+      - name: Upload built binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: mingw-binaries
+          path: |
+            build/imgui_terminal.exe
+            build/test_core.exe
+            build/test_input.exe
+          retention-days: 14

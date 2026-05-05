@@ -29,5 +29,12 @@ imgui.ini
 # Build output (Makefile.imgui)
 build/
 
+# vcpkg — Windows users clone this into the repo root for the MSVC
+# build (see README). 1+ GB after bootstrap; never tracked.
+/vcpkg/
+
+# Claude Code per-project state (settings, cached agent context, etc.)
+.claude/
+
 # Per-test latest run output — only expected.json is committed
 tests/automation/*/*/actual.json

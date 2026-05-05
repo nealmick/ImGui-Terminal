@@ -12,18 +12,51 @@ anything — wherever ImGui runs this terminal runs.
 
 ## Build
 
-Builds the default GLFW + OpenGL example. Requires GLFW, fontconfig, and freetype.
+CMake 3.21+ and a **C++20 compiler** (gcc 10+, clang 10+, Apple clang
+12+ / Xcode 12+, MSVC 19.29+ / VS 2019 16.10+). Requires GLFW,
+fontconfig, and freetype.
+
+### Linux / macOS
+
+Install deps via your package manager (apt, brew, etc.), then:
 
 ```sh
-make
+cmake -B build -S .
+cmake --build build
 ./build/imgui_terminal
 ```
 
-Alternative renderers:
+### Windows (MSVC)
+
+Visual Studio 2019+. Clone vcpkg into the repo once and bootstrap it;
+CMake auto-detects it from `./vcpkg/`:
+
+```powershell
+git clone https://github.com/microsoft/vcpkg.git
+.\vcpkg\bootstrap-vcpkg.bat
+cmake -B build -S .
+cmake --build build --config Release
+.\build\imgui_terminal.exe
+```
+
+### Windows (MinGW / MSYS2)
+From a MinGW64 shell (mintty):
 
 ```sh
-make metal     # ./build/imgui_terminal_metal   (macOS only)
-make vulkan    # ./build/imgui_terminal_vulkan  (requires Vulkan SDK)
+pacman -S make cmake mingw-w64-x86_64-toolchain \
+          mingw-w64-x86_64-glfw mingw-w64-x86_64-freetype \
+          mingw-w64-x86_64-fontconfig mingw-w64-x86_64-pkg-config
+cmake -B build -S .
+cmake --build build
+./build/imgui_terminal
+```
+
+### Alternative renderers / native clients
+
+```sh
+cmake --build build --target imgui_terminal_metal   # macOS only
+cmake --build build --target imgui_terminal_vulkan  # needs Vulkan SDK
+cmake --build build --target p_osx                  # native macOS Cocoa+Metal
 ```
 
 
@@ -65,8 +98,8 @@ ImGui Terminal:
 https://github.com/user-attachments/assets/056e0a06-1188-4a7e-934c-6f998d36d7c4
 
 ## License
-- This code (root, including `imgui_win.cpp`, `main.cpp`, `Makefile`,
-  build config, etc.) — see `LICENSE` (BSL 1.1), me (at) nealmick (dot) com for licensing 
+- This code (root, including `imgui_win.cpp`, `main.cpp`,
+  `CMakeLists.txt`, build config, etc.) — see `LICENSE` (BSL 1.1), me (at) nealmick (dot) com for licensing 
 - Upstream st (`st/`) — see `st/LICENSE` (MIT)
 - ImGui (`imgui/`) — see `imgui/LICENSE.txt` (MIT)
 
