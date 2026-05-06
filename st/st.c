@@ -1,13 +1,40 @@
 /* See LICENSE for license details. */
+
+#ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
+#ifndef WINVER
+#define WINVER 0x0A00
+#endif
+#ifndef NTDDI_VERSION
+#define NTDDI_VERSION 0x0A000006   /* NTDDI_WIN10_RS5 — ConPTY */
+#endif
+#endif
+
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
-#include <pwd.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN  /* skip legacy headers + macro pollution */
+#include <windows.h>
+#include <process.h>
+#include <io.h>
+#include <sys/types.h>     /* pid_t (only used in POSIX paths) */
+#ifdef _MSC_VER
+/* MSVC's <sys/types.h> doesn't define ssize_t. SSIZE_T (uppercase)
+   comes from <BaseTsd.h>, included transitively by <windows.h>. */
+typedef SSIZE_T ssize_t;
+#endif
+#else
+#include <pwd.h>
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
@@ -15,17 +42,90 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
-#include <wchar.h>
+#endif
 
 #include "st.h"
 #include "win.h"
 
+#ifndef _WIN32
 #if   defined(__linux)
  #include <pty.h>
 #elif defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
  #include <util.h>
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
  #include <libutil.h>
+#endif
+#endif
+
+#ifdef _WIN32
+/* ---- Windows ConPTY state ----
+ *
+ * w32_pipe_in is intentionally non-static: imgui_win.cpp's pump uses it
+ * via PeekNamedPipe to non-blocking-poll for child output, mirroring the
+ * POSIX adapter's use of cmdfd with select(2). All other state stays
+ * private to this translation unit. */
+static HPCON   w32_hpc;           /* ConPTY handle                  */
+       HANDLE  w32_pipe_in;       /* read end  — child stdout → us  */
+static HANDLE  w32_pipe_out;      /* write end — us → child stdin   */
+static HANDLE  w32_proc;          /* child process handle            */
+static HANDLE  w32_reader_ready;  /* signaled once ReadFile entered */
+
+/*
+ * wcwidth() — MinGW lacks this.
+ *
+ * Strategy:
+ *   1. Cheap rejects for NUL / C0 / C1 control codes.
+ *   2. Ask Win32 (GetStringTypeW + C3_NONSPACING) for combining marks
+ *      → return 0.
+ *   3. Explicit ranges for East-Asian Wide (W) and Fullwidth (F)
+ *      blocks → return 2. We DON'T rely on C3_FULLWIDTH here because
+ *      it only flags the U+FFxx Halfwidth/Fullwidth Forms block —
+ *      it misses CJK Unified Ideographs (U+4E00–U+9FFF) and most
+ *      other actually-wide ranges.
+ *   4. Everything else → return 1.
+ *
+ * Ambiguous-width chars (box drawing, geometric shapes, misc symbols,
+ * dingbats, etc.) are deliberately NOT widened — return 1 — to match
+ * glibc's default and keep vim/less cursor tracking in sync.
+ */
+static int
+wcwidth(unsigned int ucs)
+{
+	WORD    type = 0;
+	wchar_t wc;
+
+	if (ucs == 0)
+		return 0;
+	if (ucs < 32 || (ucs >= 0x7f && ucs < 0xa0))
+		return -1;
+
+	/* Combining marks → 0. BMP only; GetStringTypeW takes UTF-16. */
+	if (ucs <= 0xFFFF) {
+		wc = (wchar_t)ucs;
+		if (GetStringTypeW(CT_CTYPE3, &wc, 1, &type) &&
+		    (type & C3_NONSPACING))
+			return 0;
+	}
+
+	/* East Asian Wide / Fullwidth ranges → 2. */
+	if ((ucs >= 0x1100  && ucs <= 0x115F)  ||  /* Hangul Jamo init     */
+	    (ucs >= 0x2E80  && ucs <= 0x303E)  ||  /* CJK Radicals/Symbols */
+	    (ucs >= 0x3041  && ucs <= 0x33FF)  ||  /* Hiragana → CJK Compat*/
+	    (ucs >= 0x3400  && ucs <= 0x4DBF)  ||  /* CJK Ext A            */
+	    (ucs >= 0x4E00  && ucs <= 0x9FFF)  ||  /* CJK Unified          */
+	    (ucs >= 0xA000  && ucs <= 0xA4CF)  ||  /* Yi                   */
+	    (ucs >= 0xAC00  && ucs <= 0xD7A3)  ||  /* Hangul Syllables     */
+	    (ucs >= 0xF900  && ucs <= 0xFAFF)  ||  /* CJK Compat           */
+	    (ucs >= 0xFE10  && ucs <= 0xFE19)  ||  /* Vertical forms       */
+	    (ucs >= 0xFE30  && ucs <= 0xFE6F)  ||  /* CJK Compat Forms     */
+	    (ucs >= 0xFF00  && ucs <= 0xFF60)  ||  /* Fullwidth Forms      */
+	    (ucs >= 0xFFE0  && ucs <= 0xFFE6)  ||  /* Fullwidth Signs      */
+	    (ucs >= 0x1F300 && ucs <= 0x1FBFF) ||  /* Emoji + Pictographic */
+	    (ucs >= 0x20000 && ucs <= 0x3FFFD))    /* CJK Ext B-G          */
+		return 2;
+
+	return 1;
+}
 #endif
 
 /* Arbitrary sizes */
@@ -152,9 +252,11 @@ typedef struct {
 	int narg;              /* nb of args */
 } STREscape;
 
+#ifndef _WIN32
 static void execsh(char *, char **);
 static void stty(char **);
 static void sigchld(int);
+#endif
 static void ttywriteraw(const char *, size_t);
 
 static void csidump(void);
@@ -225,7 +327,9 @@ static CSIEscape csiescseq;
 static STREscape strescseq;
 static int iofd = 1;
 static int cmdfd;
+#ifndef _WIN32
 static pid_t pid;
+#endif
 
 static const uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
 static const uchar utfmask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
@@ -239,7 +343,11 @@ xwrite(int fd, const char *s, size_t len)
 	ssize_t r;
 
 	while (len > 0) {
+#ifdef _WIN32
+		r = _write(fd, s, (unsigned)len);
+#else
 		r = write(fd, s, len);
+#endif
 		if (r < 0)
 			return r;
 		len -= r;
@@ -657,6 +765,207 @@ die(const char *errstr, ...)
 	exit(1);
 }
 
+#ifdef _WIN32
+/* ---- Windows ConPTY implementation of ttynew ----
+ *
+ * Layered into three helpers below ttynew itself can read top-down:
+ *
+ *   w32_monitor_thread     SIGCHLD replacement; closes ConPTY on exit
+ *   w32_build_cmdline      argv[] -> CreateProcessW command line
+ *   w32_spawn_pcon_child   the STARTUPINFOEXW + CreateProcessW dance
+ *
+ * The monitor / reader synchronization (w32_reader_ready) is the only
+ * subtle bit — see the monitor_thread comment.
+ */
+
+/*
+ * Monitor thread — Windows replacement for SIGCHLD. Waits for the
+ * child to exit, then closes the ConPTY so the read pipe sees EOF
+ * and ttyread unwinds via exit(0).
+ *
+ * Reader-ready synchronization: ClosePseudoConsole flushes the
+ * child's last output into the pipe and then breaks the pipe. The
+ * reader must already be blocked in ReadFile when this happens, or
+ * it will race past the pending data and see only the broken-pipe
+ * error. ttyread sets w32_reader_ready on its first call; we wait
+ * on it (5 s safety timeout) before tearing down the console.
+ */
+static unsigned __stdcall
+w32_monitor_thread(void *arg)
+{
+	(void)arg;
+	WaitForSingleObject(w32_proc, INFINITE);
+	WaitForSingleObject(w32_reader_ready, 5000);
+	if (w32_hpc) {
+		ClosePseudoConsole(w32_hpc);
+		w32_hpc = NULL;
+	}
+	return 0;
+}
+
+/*
+ * Build the child command line into the caller's buffer. Joins
+ * args[] with spaces, quoting any element containing whitespace.
+ * Args are trusted: no escape handling for embedded quotes or
+ * trailing backslashes — see CommandLineToArgvW for the full rules
+ * if that ever becomes a requirement.
+ *
+ * Falls back to cmd / COMSPEC / cmd.exe when args is NULL or empty.
+ *
+ * Dies on overflow rather than silently truncating into a malformed
+ * spawn that would fail later with a less obvious error.
+ */
+static void
+w32_build_cmdline(char *buf, size_t cap, char *cmd, char **args)
+{
+	size_t pos = 0;
+	char **p;
+	const char *shell;
+
+	if (args && args[0]) {
+		for (p = args; *p; p++) {
+			int    quote = (strchr(*p, ' ') != NULL);
+			size_t alen  = strlen(*p);
+			size_t need  = alen + (quote ? 2 : 0) + (pos > 0 ? 1 : 0);
+
+			if (pos + need + 1 > cap)
+				die("ttynew: command line exceeds %zu bytes\n", cap);
+			if (pos > 0)  buf[pos++] = ' ';
+			if (quote)    buf[pos++] = '"';
+			memcpy(buf + pos, *p, alen);
+			pos += alen;
+			if (quote)    buf[pos++] = '"';
+		}
+		buf[pos] = '\0';
+		return;
+	}
+
+	shell = cmd ? cmd : getenv("COMSPEC");
+	if (!shell) shell = "cmd.exe";
+	if ((size_t)snprintf(buf, cap, "%s", shell) >= cap)
+		die("ttynew: command line exceeds %zu bytes\n", cap);
+}
+
+/*
+ * Spawn the child attached to ConPTY hpc. Sets up STARTUPINFOEXW
+ * with a single PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE entry, calls
+ * CreateProcessW, returns the resulting process handle through
+ * *out_proc. cmdline is consumed (CreateProcessW may modify it).
+ */
+static void
+w32_spawn_pcon_child(LPWSTR cmdline, HPCON hpc, HANDLE *out_proc)
+{
+	STARTUPINFOEXW       si;
+	PROCESS_INFORMATION  pi;
+	SIZE_T               attr_sz = 0;
+
+	ZeroMemory(&si, sizeof(si));
+	ZeroMemory(&pi, sizeof(pi));
+	si.StartupInfo.cb = sizeof(si);
+
+	InitializeProcThreadAttributeList(NULL, 1, 0, &attr_sz);
+	si.lpAttributeList = (PPROC_THREAD_ATTRIBUTE_LIST)malloc(attr_sz);
+	if (!si.lpAttributeList)
+		die("malloc(%zu) for attribute list failed\n", (size_t)attr_sz);
+	if (!InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &attr_sz))
+		die("InitializeProcThreadAttributeList failed: %lu\n",
+		    GetLastError());
+	if (!UpdateProcThreadAttribute(si.lpAttributeList, 0,
+	        PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, hpc,
+	        sizeof(HPCON), NULL, NULL))
+		die("UpdateProcThreadAttribute failed: %lu\n", GetLastError());
+
+	if (!CreateProcessW(NULL, cmdline, NULL, NULL, FALSE,
+	        EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
+	        &si.StartupInfo, &pi))
+		die("CreateProcessW failed: %lu\n", GetLastError());
+
+	DeleteProcThreadAttributeList(si.lpAttributeList);
+	free(si.lpAttributeList);
+	CloseHandle(pi.hThread);
+	*out_proc = pi.hProcess;
+}
+
+int
+ttynew(const char *line, char *cmd, const char *out, char **args)
+{
+	SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+	HANDLE   pipe_in_r, pipe_in_w, pipe_out_r, pipe_out_w;
+	COORD    size;
+	HRESULT  hr;
+	char     cmdline[4096];
+	wchar_t *wcmd;
+	int      wlen;
+
+	(void)line;  /* Windows has no tty device path */
+
+	/* Optional I/O capture file (-o flag). */
+	if (out) {
+		term.mode |= MODE_PRINT;
+		iofd = (!strcmp(out, "-")) ?
+		       1 : _open(out, O_WRONLY | O_CREAT, 0666);
+		if (iofd < 0)
+			fprintf(stderr, "Error opening %s:%s\n",
+			        out, strerror(errno));
+	}
+
+	/* Two pipe pairs for ConPTY <-> child. SECURITY_ATTRIBUTES with
+	   bInheritHandle=TRUE is required — ConPTY duplicates the inner
+	   ends into conhost.exe internally. */
+	if (!CreatePipe(&pipe_in_r, &pipe_in_w, &sa, 0))
+		die("CreatePipe (in) failed: %lu\n", GetLastError());
+	if (!CreatePipe(&pipe_out_r, &pipe_out_w, &sa, 0))
+		die("CreatePipe (out) failed: %lu\n", GetLastError());
+
+	/* Pseudo-console attached to the inner pipe ends. */
+	size.X = (SHORT)(term.col ? term.col : 80);
+	size.Y = (SHORT)(term.row ? term.row : 24);
+	hr = CreatePseudoConsole(size, pipe_in_r, pipe_out_w, 0, &w32_hpc);
+	if (FAILED(hr))
+		die("CreatePseudoConsole failed: 0x%lx\n", (unsigned long)hr);
+
+	/* ConPTY owns the inner ends; we keep the outer ends. */
+	CloseHandle(pipe_in_r);
+	CloseHandle(pipe_out_w);
+	w32_pipe_in  = pipe_out_r;
+	w32_pipe_out = pipe_in_w;
+
+	/* TERM for ncurses-aware programs. MSYS=enable_pcon tells the
+	   MSYS2/Cygwin runtime to cooperate with ConPTY rather than
+	   bypassing it through its own PTY layer. */
+	SetEnvironmentVariableA("TERM", termname);
+	SetEnvironmentVariableA("MSYS", "enable_pcon");
+
+	/* Build the command line, convert UTF-8 -> UTF-16, spawn. */
+	w32_build_cmdline(cmdline, sizeof(cmdline), cmd, args);
+	wlen = MultiByteToWideChar(CP_UTF8, 0, cmdline, -1, NULL, 0);
+	if (wlen <= 0)
+		die("MultiByteToWideChar failed: %lu\n", GetLastError());
+	wcmd = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
+	if (!wcmd)
+		die("malloc for wide cmdline failed\n");
+	MultiByteToWideChar(CP_UTF8, 0, cmdline, -1, wcmd, wlen);
+
+	w32_spawn_pcon_child(wcmd, w32_hpc, &w32_proc);
+	free(wcmd);
+
+	/* Reader-ready event must exist before the monitor thread starts
+	   (the thread waits on it). See w32_monitor_thread comment. */
+	w32_reader_ready = CreateEvent(NULL, TRUE, FALSE, NULL);
+	if (!w32_reader_ready)
+		die("CreateEvent failed: %lu\n", GetLastError());
+
+	if (_beginthreadex(NULL, 0, w32_monitor_thread, NULL, 0, NULL) == 0)
+		die("_beginthreadex(monitor) failed: %s\n", strerror(errno));
+
+	/* cmdfd is opaque on Windows — imgui_win.cpp's pump uses
+	   w32_pipe_in directly. Just needs to be >= 0. */
+	cmdfd = 1;
+	return cmdfd;
+}
+
+#else /* !_WIN32 — original POSIX implementation */
+
 void
 execsh(char *cmd, char **args)
 {
@@ -687,7 +996,16 @@ execsh(char *cmd, char **args)
 		prog = sh;
 		arg = NULL;
 	}
-	DEFAULT(args, ((char *[]) {prog, arg, NULL}));
+
+	/* Spawn the child as a login shell (argv[0] = "-shellname") so
+	   ~/.zprofile / .bash_profile is sourced. macOS GUI-launched apps
+	   inherit launchd's minimal PATH; the login shell is what populates
+	   it. Matches Terminal.app, iTerm2, Alacritty default behavior. */
+	const char *base = strrchr(prog, '/');
+	base = base ? base + 1 : prog;
+	char argv0[256];
+	snprintf(argv0, sizeof argv0, "-%s", base);
+	DEFAULT(args, ((char *[]) {argv0, arg, NULL}));
 
 	unsetenv("COLUMNS");
 	unsetenv("LINES");
@@ -813,7 +1131,48 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
 	}
 	return cmdfd;
 }
+#endif /* !_WIN32 */
 
+#ifdef _WIN32
+size_t
+ttyread(void)
+{
+	static char buf[BUFSIZ];
+	static int buflen = 0;
+	int written;
+
+	/* Signal (once) that the reader is active. The monitor thread
+	   waits for this before calling ClosePseudoConsole. */
+	static int reader_signaled = 0;
+	if (!reader_signaled) {
+		SetEvent(w32_reader_ready);
+		reader_signaled = 1;
+	}
+
+	DWORD dwRead = 0;
+	if (!ReadFile(w32_pipe_in, buf+buflen, LEN(buf)-buflen,
+	              &dwRead, NULL) || dwRead == 0) {
+		/* Pipe broken by ClosePseudoConsole. Drain residual. */
+		for (;;) {
+			if (!ReadFile(w32_pipe_in, buf+buflen, LEN(buf)-buflen,
+			              &dwRead, NULL) || dwRead == 0)
+				break;
+			buflen += (int)dwRead;
+			written = twrite(buf, buflen, 0);
+			buflen -= written;
+			if (buflen > 0)
+				memmove(buf, buf + written, buflen);
+		}
+		exit(0);
+	}
+	buflen += (int)dwRead;
+	written = twrite(buf, buflen, 0);
+	buflen -= written;
+	if (buflen > 0)
+		memmove(buf, buf + written, buflen);
+	return (size_t)dwRead;
+}
+#else
 size_t
 ttyread(void)
 {
@@ -839,6 +1198,7 @@ ttyread(void)
 		return ret;
 	}
 }
+#endif
 
 void
 ttywrite(const char *s, size_t n, int may_echo)
@@ -871,6 +1231,17 @@ ttywrite(const char *s, size_t n, int may_echo)
 void
 ttywriteraw(const char *s, size_t n)
 {
+#ifdef _WIN32
+	/* Windows ConPTY: WriteFile on the pipe. Simpler than the Unix
+	   pselect() dance because ConPTY handles flow control internally. */
+	while (n > 0) {
+		DWORD written = 0;
+		if (!WriteFile(w32_pipe_out, s, (DWORD)n, &written, NULL))
+			die("write error on tty: %lu\n", GetLastError());
+		n -= written;
+		s += written;
+	}
+#else
 	fd_set wfd, rfd;
 	ssize_t r;
 	size_t lim = 256;
@@ -923,11 +1294,19 @@ ttywriteraw(const char *s, size_t n)
 
 write_error:
 	die("write error on tty: %s\n", strerror(errno));
+#endif
 }
 
 void
 ttyresize(int tw, int th)
 {
+#ifdef _WIN32
+	COORD size;
+	size.X = (SHORT)term.col;
+	size.Y = (SHORT)term.row;
+	if (w32_hpc)
+		ResizePseudoConsole(w32_hpc, size);
+#else
 	struct winsize w;
 
 	w.ws_row = term.row;
@@ -936,13 +1315,26 @@ ttyresize(int tw, int th)
 	w.ws_ypixel = th;
 	if (ioctl(cmdfd, TIOCSWINSZ, &w) < 0)
 		fprintf(stderr, "Couldn't set window size: %s\n", strerror(errno));
+#endif
 }
 
 void
 ttyhangup(void)
 {
+#ifdef _WIN32
+	if (w32_proc) {
+		TerminateProcess(w32_proc, 1);
+		CloseHandle(w32_proc);
+		w32_proc = NULL;
+	}
+	if (w32_hpc) {
+		ClosePseudoConsole(w32_hpc);
+		w32_hpc = NULL;
+	}
+#else
 	/* Send SIGHUP to shell */
 	kill(pid, SIGHUP);
+#endif
 }
 
 int
@@ -2059,8 +2451,13 @@ strreset(void)
 void
 sendbreak(const Arg *arg)
 {
+#ifdef _WIN32
+	/* ConPTY has no break equivalent; ignore. */
+	(void)arg;
+#else
 	if (tcsendbreak(cmdfd, 0))
 		perror("Error sending break");
+#endif
 }
 
 void
@@ -2068,7 +2465,11 @@ tprinter(char *s, size_t len)
 {
 	if (iofd != -1 && xwrite(iofd, s, len) < 0) {
 		perror("Error writing to output file");
+#ifdef _WIN32
+		_close(iofd);
+#else
 		close(iofd);
+#endif
 		iofd = -1;
 	}
 }

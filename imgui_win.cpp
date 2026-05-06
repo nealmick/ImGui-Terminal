@@ -32,7 +32,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/select.h>
+#endif
 
 /* Executable-path lookup for resolving rgb.txt relative to the binary
  * (instead of the CWD). No portable C API for this — short platform block. */
@@ -49,6 +53,10 @@
 extern "C" {
 #include "st.h"
 #include "win.h"
+#ifdef _WIN32
+/* ConPTY read-pipe handle, defined in st.c */
+extern HANDLE w32_pipe_in;
+#endif
 }
 
 
@@ -111,19 +119,24 @@ typedef struct {
 	printscreen, printsel, toggleprinter) are already declared in st.h.
 
 	zoom/zoomabs/zoomreset are stubs reserved for font-reload-on-zoom.
-	They're not currently referenced by the shortcuts[] array
-	(omitted to avoid C++11 designated-initializer-for-union friction),
-	but the prototypes stay so the bodies below have something to declare
-	— `unused` attribute keeps -Wall quiet until they're wired in.
+	They're not currently referenced by the shortcuts[] array, but the
+	prototypes stay so the bodies below have something to declare —
+	IMW_UNUSED keeps -Wall quiet until they're wired in. MSVC has no
+	equivalent attribute in this position, so the macro is empty there.
 */
+#if defined(__GNUC__) || defined(__clang__)
+#define IMW_UNUSED __attribute__((unused))
+#else
+#define IMW_UNUSED
+#endif
 static void clipcopy(const Arg *);
 static void clippaste(const Arg *);
 static void selpaste(const Arg *);
 static void numlock(const Arg *);
-static void zoom(const Arg *)      __attribute__((unused));
-static void zoomabs(const Arg *)   __attribute__((unused));
-static void zoomreset(const Arg *) __attribute__((unused));
-static void ttysend(const Arg *)   __attribute__((unused));
+static void zoom(const Arg *)      IMW_UNUSED;
+static void zoomabs(const Arg *)   IMW_UNUSED;
+static void zoomreset(const Arg *) IMW_UNUSED;
+static void ttysend(const Arg *)   IMW_UNUSED;
 
 /*
 	Adapter config — provides storage for st.h's externs (utmp, tabspaces,
@@ -612,11 +625,13 @@ imw_loadcols(void)
 {
 	imw_load_rgb_db();
 	for (int i = 0; i < IMW_COLORS_LEN; i++) {
-		ImU32 c;
 		/*
 			NULL name -> derive from index (mirrors x.c xloadcolor's
-			"no name" path).
+			"no name" path). c is zero-init to quiet a false
+			-Wmaybe-uninitialized at -O2+; imw_resolve_color_at
+			always writes c on success and we die() on failure.
 		*/
+		ImU32 c = 0;
 		if (!imw_resolve_color_at(i, NULL, &c))
 			die("imgui_win: cannot derive color slot %d\n", i);
 		colors[i] = c;
@@ -936,7 +951,15 @@ static void
 imw_get_exe_dir(char *out, size_t n)
 {
 	out[0] = '\0';
-#ifdef __APPLE__
+#ifdef _WIN32
+	DWORD r = GetModuleFileNameA(NULL, out, (DWORD)n);
+	if (r == 0 || r >= n)
+		return;
+	char *sep = strrchr(out, '\\');
+	if (!sep) sep = strrchr(out, '/');
+	if (sep) *sep = '\0';
+	return;
+#elif defined(__APPLE__)
 	uint32_t sz = (uint32_t)n;
 	if (_NSGetExecutablePath(out, &sz) != 0)
 		return;
@@ -1344,6 +1367,19 @@ imw_pump_pty(void)
 	*/
 	const double drain_budget_s = 0.005;
 	const double deadline = ImGui::GetTime() + drain_budget_s;
+#ifdef _WIN32
+	/* Windows: poll the ConPTY read-pipe for available data. */
+	for (;;) {
+		DWORD avail = 0;
+		if (!PeekNamedPipe(w32_pipe_in, NULL, 0, NULL, &avail, NULL))
+			break;
+		if (avail == 0)
+			break;
+		ttyread();
+		if (ImGui::GetTime() >= deadline)
+			break;
+	}
+#else
 	fd_set rfds;
 	struct timeval tv = { 0, 0 };
 	for (;;) {
@@ -1360,6 +1396,7 @@ imw_pump_pty(void)
 		if (ImGui::GetTime() >= deadline)
 			break;
 	}
+#endif
 }
 
 /*
@@ -1541,7 +1578,27 @@ imw_drawglyphfontspecs(const ImwGlyphSpec *specs, Glyph base,
 		Without this, gutters at the edges keep the canvas-wide default
 		bg and don't follow per-cell bg variations. Done BEFORE the cell
 		bg fill so the gutter and cell agree.
+
+		Right/bottom gutters end at the canonical gutter edge
+		(borderpx past the cell grid), NOT at the canvas edge — when
+		the canvas is resized so the cell grid doesn't tile it exactly,
+		any leftover beyond the gutter is "no-cell zone" and must keep
+		the canvas-default bg. Without this clamp, a block/underline
+		cursor on the last row (or last column) paints its color into
+		the leftover region, visibly extending past the cell.
 	*/
+	/*
+		Canonical gutter end is borderpx past the cell grid. Clamp by the
+		actual canvas dimension: in test fixtures tw.w == tw.tw (no real
+		canvas border), so falling back to tw.w preserves byte-for-byte
+		test golden output. In the live UI tw.w is the ImGui-given canvas
+		size; when oversized past canon, we still stop at canon so the
+		leftover stays canvas-default bg.
+	*/
+	const int gutter_right  = (tw.w < borderpx + tw.tw + borderpx)
+	                          ? tw.w : borderpx + tw.tw + borderpx;
+	const int gutter_bottom = (tw.h < borderpx + tw.th + borderpx)
+	                          ? tw.h : borderpx + tw.th + borderpx;
 	if (x == 0)  /*  left gutter  */
 		imw_clear(0,
 		           (y == 0) ? 0 : winy,
@@ -1550,12 +1607,12 @@ imw_drawglyphfontspecs(const ImwGlyphSpec *specs, Glyph base,
 	if (winx + width >= borderpx + tw.tw)  /*  right gutter  */
 		imw_clear(winx + width,
 		           (y == 0) ? 0 : winy,
-		           tw.w,
+		           gutter_right,
 		           winy + tw.ch, bg);
 	if (y == 0)  /*  top gutter  */
 		imw_clear(winx, 0, winx + width, borderpx, bg);
 	if (winy + tw.ch >= borderpx + tw.th)  /*  bottom gutter  */
-		imw_clear(winx, winy + tw.ch, winx + width, tw.h, bg);
+		imw_clear(winx, winy + tw.ch, winx + width, gutter_bottom, bg);
 
 	/*  Cell bg fill — coords widget-relative; replay adds canvas_pos.  */
 	ImVec2 p0((float)winx, (float)winy);
@@ -1580,6 +1637,28 @@ imw_drawglyphfontspecs(const ImwGlyphSpec *specs, Glyph base,
 		char buf[8];
 		int n = (int)utf8encode(s->codepoint, buf);
 		ImVec2 gp((float)s->x, (float)s->y);
+#ifdef _WIN32
+		/* Center emoji glyphs in their cell. ImGui renders at
+		   pos + (X0,Y0)*scale — shift pos so the glyph visual
+		   center lands at the cell center. Mirrors a quirk Windows
+		   Terminal also fails to handle: it doesn't center emoji
+		   glyphs properly inside their wide-cell slot. */
+		if ((base.mode & ATTR_WIDE) && s->codepoint > 0xFFFF) {
+			ImFontBaked *baked = s->font->GetFontBaked(dc.font.pxsize);
+			if (baked) {
+				const ImFontGlyph *gl = baked->FindGlyph((ImWchar)s->codepoint);
+				if (gl) {
+					float sc = dc.font.pxsize / baked->Size;
+					float gw = (gl->X1 - gl->X0) * sc;
+					float gh = (gl->Y1 - gl->Y0) * sc;
+					float cw2 = (float)(tw.cw * 2);
+					float ch1 = (float)tw.ch;
+					gp.x += (cw2 - gw) * 0.5f - gl->X0 * sc;
+					gp.y += (ch1 - gh) * 0.5f - gl->Y0 * sc;
+				}
+			}
+		}
+#endif
 		imw_emit_text(s->font, gp, fg, buf, n);
 	}
 
@@ -1783,8 +1862,14 @@ imw_load_fallback(const char *fc_query, double pxsize)
 		Only set this for the emoji query — CJK/Hiragino is an outline
 		font and rasterizes correctly at any size, no override needed.
 	*/
+#ifndef _WIN32
+	/* Apple Color Emoji is a bitmap font with fixed strikes — needs
+	   density override to land on a working ppem. Windows emoji fonts
+	   (Segoe UI Emoji, Noto Color Emoji) are outline/COLR and
+	   rasterize correctly at any size without this hack. */
 	if (strstr(fc_query, "und-zsye") != NULL)
 		cfg.RasterizerDensity = 20.0f / (float)pxsize;
+#endif
 
 	ImFont *merged = ImGui::GetIO().Fonts->AddFontFromFileTTF(
 	    (const char *)file, (float)pxsize, &cfg);
@@ -1813,6 +1898,28 @@ imw_load_variant_fallbacks(double pxsize)
 static void
 imw_load_fonts(void)
 {
+#ifdef _WIN32
+	/* fontconfig on Windows can't find its config files via the built-in
+	   defaults (vcpkg bakes paths to its install dir, which is the wrong
+	   location once the binary is run from anywhere else). Point
+	   FONTCONFIG_PATH at <exe_dir>/fontconfig/, where the build copies
+	   fonts.conf + conf.d/ via a CMake POST_BUILD step.
+
+	   _putenv_s (NOT SetEnvironmentVariableA): MSVC's C runtime keeps a
+	   separate cached environment from the Win32 process environment,
+	   and fontconfig calls getenv() which reads only the CRT copy.
+	   _putenv_s updates both. Affects this process only — no global
+	   state pollution, architecture-agnostic. */
+	{
+		char exe_dir[1024];
+		imw_get_exe_dir(exe_dir, sizeof exe_dir);
+		if (exe_dir[0]) {
+			char fc_path[1024];
+			snprintf(fc_path, sizeof fc_path, "%s\\fontconfig", exe_dir);
+			_putenv_s("FONTCONFIG_PATH", fc_path);
+		}
+	}
+#endif
 	if (!FcInit())
 		die("imgui_win: FcInit failed\n");
 
@@ -2799,10 +2906,24 @@ term_dump_json(FILE *out)
 	fprintf(out, "  \"ch\": %d,\n",            tw.ch);
 	fprintf(out, "  \"tw\": %d,\n",            tw.tw);
 	fprintf(out, "  \"th\": %d,\n",            tw.th);
-	fprintf(out, "  \"mode\": %d,\n",          tw.mode);
+	/* Mask out MODE_FOCUS for cross-platform test stability.
+	   ConPTY unconditionally sends \033[?1004h which sets this
+	   bit; raw POSIX PTYs don't. The bit is ConPTY infrastructure,
+	   not application state, so stripping it produces baselines
+	   that match across platforms. */
+	int dump_mode = tw.mode;
+#ifdef _WIN32
+	dump_mode &= ~MODE_FOCUS;
+#endif
+	fprintf(out, "  \"mode\": %d,\n",          dump_mode);
 	fprintf(out, "  \"cursor_shape\": %d,\n",  tw.cursor);
+	/* Use the default title for dump stability. ConPTY and some
+	   shells send OSC title-set sequences (exe path, PS1 \w, etc.)
+	   before the script runs — these are environment-dependent and
+	   would break cross-platform test baselines. */
+	const char *dump_title = "Terminal";
 	fprintf(out, "  \"title\": ");
-	imw_dump_jstr(out, term_title, (int)strlen(term_title));
+	imw_dump_jstr(out, dump_title, (int)strlen(dump_title));
 	fprintf(out, ",\n");
 
 	int rows = (int)imw_row_ops.size();

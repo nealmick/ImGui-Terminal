@@ -43,8 +43,13 @@
 
 /* ---------- Font / cell sizing — mirrors config.def.h:8, 29-30 ---------- */
 
+#ifdef _WIN32
+static const char *font =
+    "Consolas:pixelsize=16:antialias=true:autohint=true";
+#else
 static const char *font =
     "Menlo:pixelsize=16:antialias=true:autohint=true";
+#endif
 
 static const float cwscale = 1.0f;
 static const float chscale = 1.0f;

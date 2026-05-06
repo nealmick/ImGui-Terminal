@@ -1,0 +1,68 @@
+name: msvc-build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# windows-latest ships with Visual Studio 2022 (C++ workload) + Windows
+# SDK + CMake + git already installed. We just need vcpkg, which we
+# clone in-repo to match the local-dev pattern documented in README.md.
+#
+# vcpkg's BUILT packages (the slow part — fontconfig + glib +
+# libxml2 each take a few minutes) are cached via actions/cache so
+# subsequent CI runs reuse them. First run from a cache miss takes
+# ~10 min; cache hit takes ~1 min.
+
+jobs:
+  msvc:
+    runs-on: windows-latest
+    env:
+      # vcpkg writes its binary cache here by default at
+      # %LOCALAPPDATA%\vcpkg\archives. Override to a workspace-relative
+      # path so actions/cache@v4 can address it without env-var
+      # expansion gymnastics.
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-cache
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache vcpkg-built packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          # Cache key includes the manifest hash — when vcpkg.json
+          # changes (added/removed dep, version bump), the cache is
+          # invalidated and packages get rebuilt.
+          key:          vcpkg-msvc-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-msvc-
+
+      - name: Setup vcpkg
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          if (-not (Test-Path vcpkg\vcpkg.exe)) {
+            git clone https://github.com/microsoft/vcpkg.git
+            .\vcpkg\bootstrap-vcpkg.bat
+          }
+
+      - name: Configure (vcpkg auto-detected from ./vcpkg/)
+        run: cmake -B build -S .
+
+      - name: Build all targets (Release)
+        run: cmake --build build --config Release
+
+      # Upload the built binaries so anyone reviewing a CI run can grab
+      # a Windows MSVC build without setting up VS + vcpkg locally.
+      # vcpkg auto-stages runtime DLLs alongside the exes, so the
+      # artifact zip is self-contained.
+      - name: Upload built binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: msvc-binaries
+          path: |
+            build/imgui_terminal.exe
+            build/*.dll
+          retention-days: 14
