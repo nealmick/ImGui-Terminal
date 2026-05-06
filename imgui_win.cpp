@@ -1898,6 +1898,28 @@ imw_load_variant_fallbacks(double pxsize)
 static void
 imw_load_fonts(void)
 {
+#ifdef _WIN32
+	/* fontconfig on Windows can't find its config files via the built-in
+	   defaults (vcpkg bakes paths to its install dir, which is the wrong
+	   location once the binary is run from anywhere else). Point
+	   FONTCONFIG_PATH at <exe_dir>/fontconfig/, where the build copies
+	   fonts.conf + conf.d/ via a CMake POST_BUILD step.
+
+	   _putenv_s (NOT SetEnvironmentVariableA): MSVC's C runtime keeps a
+	   separate cached environment from the Win32 process environment,
+	   and fontconfig calls getenv() which reads only the CRT copy.
+	   _putenv_s updates both. Affects this process only — no global
+	   state pollution, architecture-agnostic. */
+	{
+		char exe_dir[1024];
+		imw_get_exe_dir(exe_dir, sizeof exe_dir);
+		if (exe_dir[0]) {
+			char fc_path[1024];
+			snprintf(fc_path, sizeof fc_path, "%s\\fontconfig", exe_dir);
+			_putenv_s("FONTCONFIG_PATH", fc_path);
+		}
+	}
+#endif
 	if (!FcInit())
 		die("imgui_win: FcInit failed\n");
 

@@ -215,6 +215,34 @@ function(imw_configure_target target)
     endif()
 endfunction()
 
+# Stage vcpkg's fontconfig data (fonts.conf + conf.d/) next to the
+# binary on MSVC builds. fontconfig is built by vcpkg with absolute
+# default paths pointing at vcpkg's install dir — the wrong location
+# once the binary moves. imgui_win.cpp's imw_load_fonts() sets
+# FONTCONFIG_PATH to <exe_dir>/fontconfig at runtime; this POST_BUILD
+# copy makes that path real.
+#
+# Triplet-agnostic: ${VCPKG_TARGET_TRIPLET} is set by vcpkg's toolchain
+# to whatever's appropriate (x64-windows, arm64-windows, x86-windows).
+function(imw_msvc_stage_fontconfig target)
+    if(MSVC AND DEFINED VCPKG_TARGET_TRIPLET)
+        # vcpkg ships the runtime fontconfig data at etc/fonts/
+        # (containing fonts.conf + conf.d/). The share/fontconfig/
+        # path holds only metadata (copyright, .conf.avail templates,
+        # CMake wrappers) — NOT the runtime config.
+        set(_fc_src
+            "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/etc/fonts")
+        if(EXISTS "${_fc_src}")
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${_fc_src}"
+                    "$<TARGET_FILE_DIR:${target}>/fontconfig"
+                VERBATIM
+            )
+        endif()
+    endif()
+endfunction()
+
 #====================================================================
 # Default target — GLFW + OpenGL host
 #====================================================================
@@ -226,6 +254,7 @@ add_executable(imgui_terminal
     "${CMAKE_SOURCE_DIR}/examples/main_example_glfw_gl.cpp"
 )
 imw_configure_target(imgui_terminal)
+imw_msvc_stage_fontconfig(imgui_terminal)
 target_link_libraries(imgui_terminal PRIVATE
     ${IMW_GLFW_TARGET}
     ${IMW_FREETYPE_TARGET}
@@ -312,6 +341,7 @@ if(Vulkan_FOUND)
         "${CMAKE_SOURCE_DIR}/examples/example_glfw_vulkan.cpp"
     )
     imw_configure_target(imgui_terminal_vulkan)
+    imw_msvc_stage_fontconfig(imgui_terminal_vulkan)
     target_link_libraries(imgui_terminal_vulkan PRIVATE
         ${IMW_GLFW_TARGET}
         ${IMW_FREETYPE_TARGET}
