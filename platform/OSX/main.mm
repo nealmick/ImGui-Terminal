@@ -77,7 +77,16 @@ extern void term_shutdown(void);
 	MTKView *view = [[MTKView alloc] initWithFrame:CGRectMake(0, 0, 1200, 800)
 	                                        device:_device];
 	view.clearColor = MTLClearColorMake(0.05, 0.05, 0.05, 1.0);
+    const char *home = getenv("HOME");
+	if (home) {
+		chdir(home);
+	}
 
+	/* Force the app bundle to know about Homebrew and standard local bins */
+	const char *current_path = getenv("PATH");
+	NSString *new_path = [NSString stringWithFormat:@"/opt/homebrew/bin:/usr/local/bin:%s", 
+	                                                current_path ? current_path : "/usr/bin:/bin"];
+	setenv("PATH", [new_path UTF8String], 1);
 	/* Pin the display link to the panel's refresh rate. Default of 60
 	   makes ProMotion drop to its 48Hz adaptive bin; bumping past the
 	   panel rate is a hint that gets clamped to whatever the panel
