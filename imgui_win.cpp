@@ -350,6 +350,13 @@ static std::vector<std::vector<DrawOp>> imw_row_ops;   /*  per-row, sized to ter
 static std::vector<DrawOp>              imw_overlay_ops;
 static std::vector<DrawOp>             *imw_emit_target = NULL;
 
+/*  Transparent canvas: when on, skip painting any rect whose color is
+    colors[defaultbg] — both the canvas-wide fill and per-cell default-bg
+    fills replayed from the row cache. Lets the host window's background
+    show through (e.g. MTKView clearColor on macOS). Non-default bg
+    cells (selection, ANSI bg colors, cursor) still draw normally.  */
+static int imw_transparent = 0;
+
 static inline void
 imw_emit_rect(ImVec2 p0, ImVec2 p1, ImU32 col)
 {
@@ -410,6 +417,8 @@ imw_replay_ops(const std::vector<DrawOp> &ops, ImVec2 origin, ImDrawList *dl)
 		ImVec2 p1(origin.x + op.p1.x, origin.y + op.p1.y);
 		switch (op.kind) {
 		case DrawOp::RECT:
+			if (imw_transparent && op.col == colors[defaultbg])
+				break;
 			dl->AddRectFilled(p0, p1, op.col);
 			break;
 		case DrawOp::TEXT:
@@ -2713,7 +2722,7 @@ term_draw_canvas(void)
 		become default-fg, mirroring x.c's xclear (line 856)
 		which picks `defaultfg` vs `defaultbg` by IS_SET(MODE_REVERSE).
 	*/
-	{
+	if (!imw_transparent) {
 		ImU32 bg_col = colors[(tw.mode & MODE_REVERSE)
 		                       ? defaultfg : defaultbg];
 		ImVec2 bg_p1(canvas_pos.x + avail.x,
@@ -2789,6 +2798,10 @@ term_draw_widget(void)
 		term_draw_canvas();
 	ImGui::End();
 }
+
+/*  Transparent canvas toggle — see imw_transparent comment above.  */
+void term_set_transparent(bool on) { imw_transparent = on ? 1 : 0; }
+bool term_get_transparent(void)    { return imw_transparent != 0; }
 
 void
 term_shutdown(void)

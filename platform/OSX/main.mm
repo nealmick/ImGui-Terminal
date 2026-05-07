@@ -32,6 +32,8 @@
 extern void term_init(int cols, int rows, char **argv);
 extern void term_draw_canvas(void);
 extern void term_shutdown(void);
+extern void term_set_transparent(bool on);
+extern bool term_get_transparent(void);
 
 /*
 	View controller wraps the MTKView and lets MTKView's CADisplayLink
@@ -110,6 +112,11 @@ extern void term_shutdown(void);
 	   argv). 80x24 is just an initial cell grid — the widget resizes
 	   itself to whatever pixel area Begin/End gives it. */
 	term_init(80, 24, NULL);
+
+	/* Default to transparent canvas on macOS — the MTKView clearColor
+	   shows through, so the terminal blends with the window chrome.
+	   Toggle from View → Enable/Disable Transparency. */
+	term_set_transparent(true);
 }
 
 - (void)viewWillAppear
@@ -165,8 +172,9 @@ extern void term_shutdown(void);
 		   titlebar drag drops nav focus. There's nothing else to focus
 		   in a pinned window, so this is idempotent. */
 		ImGuiViewport *vp = ImGui::GetMainViewport();
-		ImGui::SetNextWindowPos(vp->WorkPos);
-		ImGui::SetNextWindowSize(vp->WorkSize);
+		const float pad = 8.0f;
+		ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + pad, vp->WorkPos.y + pad));
+		ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x - pad * 2.0f, vp->WorkSize.y - pad * 2.0f));
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,    ImVec2(0, 0));
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding,   0.0f);
@@ -198,7 +206,7 @@ extern void term_shutdown(void);
 
 /* AppDelegate -------------------------------------------------------- */
 
-@interface AppDelegate : NSObject <NSApplicationDelegate>
+@interface AppDelegate : NSObject <NSApplicationDelegate, NSMenuDelegate>
 @property (nonatomic, strong) NSWindow *window;
 @end
 
@@ -207,6 +215,54 @@ extern void term_shutdown(void);
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender
 {
 	return YES;
+}
+
+/*
+	Build the system menu bar (the strip at the very top of the screen
+	with the Apple logo, app name, File, Edit, View, ...). We add two
+	submenus:
+
+	  - App menu  (first item; macOS substitutes the running app's name)
+	      → Quit (⌘Q)
+	  - View menu
+	      → Transparent Background  (toggles term_set_transparent)
+
+	Checkmark state for "Transparent Background" is updated at open time
+	via -validateMenuItem: — that way it always reflects the live value
+	of term_get_transparent() without us tracking it.
+*/
+- (void)installMainMenu
+{
+	NSMenu *mainMenu = [[NSMenu alloc] init];
+
+	/* App menu */
+	NSMenuItem *appItem = [[NSMenuItem alloc] init];
+	[mainMenu addItem:appItem];
+	NSMenu *appMenu = [[NSMenu alloc] init];
+	[appMenu addItemWithTitle:@"Quit"
+	                   action:@selector(terminate:)
+	            keyEquivalent:@"q"];
+	appItem.submenu = appMenu;
+
+	/* View menu */
+	NSMenuItem *viewItem = [[NSMenuItem alloc] init];
+	[mainMenu addItem:viewItem];
+	NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+	viewMenu.delegate = self;
+	/*
+		Show/Hide-style label instead of a checkmark — title flips
+		between "Enable Transparency" and "Disable Transparency" in
+		-menuNeedsUpdate:. Mirrors Finder's "Hide Toolbar/Show Toolbar"
+		idiom; avoids the checkmark column entirely.
+	*/
+	NSMenuItem *transparent =
+	    [viewMenu addItemWithTitle:@"Enable Transparency"
+	                        action:@selector(toggleTransparent:)
+	                 keyEquivalent:@""];
+	transparent.target = self;
+	viewItem.submenu = viewMenu;
+
+	NSApp.mainMenu = mainMenu;
 }
 
 - (instancetype)init
@@ -227,8 +283,32 @@ extern void term_shutdown(void);
 		_window.contentViewController = vc;
 		[_window center];
 		[_window makeKeyAndOrderFront:self];
+
+		[self installMainMenu];
 	}
 	return self;
+}
+
+/* Menu actions -------------------------------------------------------- */
+
+- (void)toggleTransparent:(NSMenuItem *)sender
+{
+	term_set_transparent(!term_get_transparent());
+}
+
+/*
+	NSMenuDelegate — fires right before the menu is sized and shown.
+	Flip the title to reflect the action that clicking will perform
+	("Enable" when currently off, "Disable" when currently on).
+*/
+- (void)menuNeedsUpdate:(NSMenu *)menu
+{
+	for (NSMenuItem *item in menu.itemArray) {
+		if (item.action == @selector(toggleTransparent:)) {
+			item.title = term_get_transparent() ? @"Disable Transparency"
+			                                    : @"Enable Transparency";
+		}
+	}
 }
 
 @end
