@@ -116,6 +116,9 @@ public:
 	void set_transparent(bool on);
 	bool is_transparent() const;
 	bool is_alive() const;
+
+	void set_font_size(float px);
+	float get_font_size();
 	size_t ttyread(); /* tests use this to drain the PTY */
 
 	/* Emulator callback receivers. Public because the cb_* extern "C"

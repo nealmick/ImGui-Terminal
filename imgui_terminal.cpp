@@ -1163,6 +1163,29 @@ Terminal::finalize_metrics()
 	metrics_derived = true;
 }
 
+float
+Terminal::get_font_size()
+{
+	return s_dc.font.pxsize;
+}
+
+void
+Terminal::set_font_size(float px)
+{
+	if (px < 6.0f)
+		px = 6.0f;
+	if (px > 72.0f)
+		px = 72.0f;
+	s_dc.font.pxsize = px;
+	s_dc.bfont.pxsize = px;
+	s_dc.ifont.pxsize = px;
+	s_dc.ibfont.pxsize = px;
+	finalize_metrics();
+
+	tw.tw = 0;
+	tw.th = 0;
+}
+
 void
 Terminal::handle_resize(ImVec2 avail)
 {

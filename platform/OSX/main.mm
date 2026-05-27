@@ -258,6 +258,16 @@ static Terminal g_term;
 						      action:@selector(toggleTransparent:)
 					       keyEquivalent:@""];
 	transparent.target = self;
+
+	NSMenuItem *bigger = [viewMenu addItemWithTitle:@"Increase Font Size"
+						 action:@selector(increaseFontSize:)
+					  keyEquivalent:@"+"];
+	bigger.target = self;
+	NSMenuItem *smaller = [viewMenu addItemWithTitle:@"Decrease Font Size"
+						  action:@selector(decreaseFontSize:)
+					   keyEquivalent:@"-"];
+	smaller.target = self;
+
 	viewItem.submenu = viewMenu;
 
 	NSApp.mainMenu = mainMenu;
@@ -291,6 +301,16 @@ static Terminal g_term;
 - (void)toggleTransparent:(NSMenuItem *)sender
 {
 	g_term.set_transparent(!g_term.is_transparent());
+}
+
+- (void)increaseFontSize:(NSMenuItem *)sender
+{
+	g_term.set_font_size(g_term.get_font_size() + 2.0f);
+}
+
+- (void)decreaseFontSize:(NSMenuItem *)sender
+{
+	g_term.set_font_size(g_term.get_font_size() - 2.0f);
 }
 
 /*
