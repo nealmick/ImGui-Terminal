@@ -85,7 +85,11 @@ cmake --build build --target p_osx                  # native macOS Cocoa+Metal
 
 
 #### Demo
-https://github.com/user-attachments/assets/056e0a06-1188-4a7e-934c-6f998d36d7c4
+https://github.com/user-attachments/assets/b1fafe54-587e-40de-b826-1904cfdf93cd
+
+
+#### Windows
+<img width="1796" height="1084" alt="Screenshot 2026-05-27 at 12 41 51 PM" src="https://github.com/user-attachments/assets/f95eef04-0344-4f53-bda0-9291c4e9222b" />
 
 ## License
 - This code (root, including `imgui_terminal.cpp`, `main.cpp`,
