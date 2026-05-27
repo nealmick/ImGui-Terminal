@@ -27,13 +27,7 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
 
-/*
-	Public API of imgui_win.cpp (the widget). C++ linkage — these
-	functions are defined as plain C++ in imgui_win.cpp, not extern "C".
-*/
-extern void term_init(int cols, int rows, char **argv);
-extern void term_draw_widget(void);
-extern void term_shutdown(void);
+#include "imgui_terminal.h"
 
 int
 main(int, char **)
@@ -41,16 +35,11 @@ main(int, char **)
 	if (!glfwInit())
 		return 1;
 
-	/*
-		No GL context — Metal will own rendering. GLFW just provides
-		the window + input events.
-	*/
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-	GLFWwindow *window = glfwCreateWindow(800, 600,
-	                                      "st-imgui (metal)",
-	                                      nullptr, nullptr);
-	if (!window) {
+	GLFWwindow *window = glfwCreateWindow(800, 600, "st-imgui (metal)", nullptr, nullptr);
+	if (!window)
+	{
 		glfwTerminate();
 		return 1;
 	}
@@ -59,43 +48,32 @@ main(int, char **)
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
 
-	/*
-		Retina / HiDPI font density tracking — same rationale as in
-		main.cpp. Metal honors ImGuiBackendFlags_RendererHasTextures
-		(declared by the Metal backend), so this works the same way.
-	*/
 	ImGui::GetIO().ConfigDpiScaleFonts = true;
 
-	id<MTLDevice> device              = MTLCreateSystemDefaultDevice();
-	id<MTLCommandQueue> commandQueue  = [device newCommandQueue];
+	id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+	id<MTLCommandQueue> commandQueue = [device newCommandQueue];
 
-	/*
-		Setup ImGui platform/renderer backends. ImGui_ImplGlfw_InitForOpenGL
-		is the right call even when there's no GL context — the function
-		name is misleading; it sets up GLFW input/event plumbing
-		regardless of which renderer the host uses.
-	*/
+	
 	ImGui_ImplGlfw_InitForOpenGL(window, true);
 	ImGui_ImplMetal_Init(device);
 
-	/*
-		Attach a CAMetalLayer to the GLFW window's native NSView so Metal
-		has a surface to draw into. Without this, nextDrawable returns
-		nil and rendering fails silently.
-	*/
-	NSWindow      *nswin = glfwGetCocoaWindow(window);
-	CAMetalLayer  *layer = [CAMetalLayer layer];
-	layer.device         = device;
-	layer.pixelFormat    = MTLPixelFormatBGRA8Unorm;
-	nswin.contentView.layer       = layer;
-	nswin.contentView.wantsLayer  = YES;
+	
+	NSWindow *nswin = glfwGetCocoaWindow(window);
+	CAMetalLayer *layer = [CAMetalLayer layer];
+	layer.device = device;
+	layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+	nswin.contentView.layer = layer;
+	nswin.contentView.wantsLayer = YES;
 
 	MTLRenderPassDescriptor *passDesc = [MTLRenderPassDescriptor new];
 
-	term_init(80, 24, NULL);
+	Terminal term;
+	term.init(80, 24, NULL);
 
-	while (!glfwWindowShouldClose(window)) {
-		@autoreleasepool {
+	while (!glfwWindowShouldClose(window))
+	{
+		@autoreleasepool
+		{
 			glfwPollEvents();
 
 			int w, h;
@@ -107,8 +85,8 @@ main(int, char **)
 
 			passDesc.colorAttachments[0].clearColor =
 			    MTLClearColorMake(0.05, 0.05, 0.05, 1.0);
-			passDesc.colorAttachments[0].texture     = drawable.texture;
-			passDesc.colorAttachments[0].loadAction  = MTLLoadActionClear;
+			passDesc.colorAttachments[0].texture = drawable.texture;
+			passDesc.colorAttachments[0].loadAction = MTLLoadActionClear;
 			passDesc.colorAttachments[0].storeAction = MTLStoreActionStore;
 
 			id<MTLRenderCommandEncoder> enc =
@@ -118,11 +96,12 @@ main(int, char **)
 			ImGui_ImplGlfw_NewFrame();
 			ImGui::NewFrame();
 
-			term_draw_widget();
+			term.draw_widget("###st_term_widget");
+			if (!term.is_alive())
+				glfwSetWindowShouldClose(window, GLFW_TRUE);
 
 			ImGui::Render();
-			ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(),
-			                               cmdBuf, enc);
+			ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cmdBuf, enc);
 
 			[enc endEncoding];
 			[cmdBuf presentDrawable:drawable];
@@ -130,7 +109,7 @@ main(int, char **)
 		}
 	}
 
-	term_shutdown();
+	term.shutdown();
 	ImGui_ImplMetal_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();

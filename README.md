@@ -1,12 +1,8 @@
 # ImGui Terminal Emulator
 
-An ImGui-native windowing layer for [suckless st][st] terminal
-emulator. Replaces st's X11/Xft frontend (`x.c`) with an ImGui-based
-adapter that runs renderer agnostic — GLFW+OpenGL, Vulkan, Metal, or 
-any other ImGui backend.
+An ImGui-native terminal emulator based on [suckless st][st]. Replaces st's X11/Xft frontend (`x.c`) with an ImGui-based adapter that runs renderer agnostic — GLFW+OpenGL, Vulkan, Metal, or any other ImGui backend.
 
-**Cross-renderer portability.** st is tied to X11. ImGui isn't tied to 
-anything — wherever ImGui runs this terminal runs.  
+**Cross-renderer portability.** st is tied to X11. wherever ImGui runs this terminal runs.  
 **Composable as a widget.** The terminal is exposed as `term_init` / 
 `term_draw_widget` / `term_shutdown`. 
 
@@ -85,24 +81,18 @@ cmake --build build --target p_osx                  # native macOS Cocoa+Metal
 
 
 ## The idea - ImGui plays the role of X11
-
-Original Suckless Terminal:
-
-`st.c -> win.h -> x.c (X adapter) -> x server (renderer api)`
-
-ImGui Terminal:
-
-`st.c -> win.h -> imgui_win.cpp (ImGui adapter) -> GLFW+OpenGL / SDL+VK / native+Metal`
-
-
-`imgui_win.cpp` deliberately uses ImGui APIs only — no GLFW, OpenGL, or Vulkan.
+`imgui_terminal.cpp` deliberately uses ImGui APIs only — no GLFW, OpenGL, or Vulkan.
 
 
 #### Demo
-https://github.com/user-attachments/assets/056e0a06-1188-4a7e-934c-6f998d36d7c4
+https://github.com/user-attachments/assets/b1fafe54-587e-40de-b826-1904cfdf93cd
+
+
+#### Windows
+<img width="1796" height="1084" alt="Screenshot 2026-05-27 at 12 41 51 PM" src="https://github.com/user-attachments/assets/f95eef04-0344-4f53-bda0-9291c4e9222b" />
 
 ## License
-- This code (root, including `imgui_win.cpp`, `main.cpp`,
+- This code (root, including `imgui_terminal.cpp`, `main.cpp`,
   `CMakeLists.txt`, build config, etc.) — see `LICENSE` (BSL 1.1), me (at) nealmick (dot) com for licensing 
 - Upstream st (`st/`) — see `st/LICENSE` (MIT)
 - ImGui (`imgui/`) — see `imgui/LICENSE.txt` (MIT)

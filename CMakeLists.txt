@@ -1,8 +1,5 @@
 # ImGui-Terminal — cross-platform CMake build.
 #
-# Replaces the per-platform Makefiles. One source of truth, one build/
-# directory, sane include/link paths everywhere.
-#
 # Quick start (all platforms):
 #   cmake -B build -S .
 #   cmake --build build [--config Release]   # --config only matters for
@@ -23,7 +20,7 @@
 #   imgui_terminal_vulkan    — Vulkan renderer host (built only if SDK found)
 #   p_osx                    — native macOS Cocoa+Metal client (macOS only)
 #
-# All output lands at  <build_dir>/<target>[.exe]  — multi-config
+# All output lands at  <build_dir>/<target>  — multi-config
 # generators (MSBuild) are flattened so the test runners can rely on
 # build/test_core regardless of Debug/Release.
 
@@ -34,17 +31,6 @@
 #   3. VCPKG_ROOT env var is set                            (fallback)
 #   4. Nothing — POSIX users without vcpkg get pkg-config below
 #
-# Rationale: dropping vcpkg next to the source means a Windows user
-# clones the repo, runs `bootstrap-vcpkg.bat` once, then `cmake -B
-# build -S .` Just Works — no -D flag, no env var.
-#
-# Gated on Windows specifically: a stray ./vcpkg/ on a Mac/Linux
-# checkout (leftover from a Windows experiment, accidental clone)
-# must NOT silently activate the vcpkg toolchain there — POSIX
-# resolves deps via pkg-config and a vcpkg toolchain would change
-# find_package() behavior in ways the rest of this file doesn't
-# expect. Mac/Linux users who genuinely want vcpkg can pass
-# -DCMAKE_TOOLCHAIN_FILE explicitly.
 
 if(WIN32 AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake")
@@ -63,9 +49,7 @@ project(imgui_terminal LANGUAGES C CXX)
 
 # Apple targets compile .mm sources, which need Objective-C++. Enable
 # the language and configure ARC + deprecation suppression up-front so
-# any Apple target later in the file works regardless of order. ARC is
-# scoped to .mm sources only — applying -fobjc-arc to .cpp files is
-# meaningless and produces compiler-warning churn on each build.
+# any Apple target later in the file works regardless of order. 
 if(APPLE)
     enable_language(OBJCXX)
     set_source_files_properties(
@@ -81,12 +65,6 @@ endif()
 #--------------------------------------------------------------------
 # Language standards
 #--------------------------------------------------------------------
-# st.c is plain C99 (suckless inheritance). The C++ side requires
-# C++20: config-imgui.h uses designated initializers, which gcc/clang
-# allow as a GNU extension under C++11+ but MSVC enforces strictly
-# (designated init landed in the standard with C++20). Apple needs
-# Xcode 12+ (Apple clang 12+) to compile this.
-
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -96,6 +74,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # which means no optimization AND no debug symbols. Default to Release
 # unless the user passed -DCMAKE_BUILD_TYPE=... or is on a multi-config
 # generator (MSVC, Xcode — they pick at build time via --config).
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING
         "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
@@ -104,29 +83,11 @@ endif()
 #--------------------------------------------------------------------
 # Output directory — flatten multi-config to keep paths predictable
 #--------------------------------------------------------------------
-# By default MSBuild puts artifacts at build/Release/imgui_terminal.exe.
-# Flatten so tests/automation/*/runner.sh's hardcoded build/test_core
-# path works on every generator.
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 foreach(cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${cfg} "${CMAKE_BINARY_DIR}")
 endforeach()
-
-#--------------------------------------------------------------------
-# config-imgui.h — generated once, then user-editable.
-#--------------------------------------------------------------------
-# Mirrors upstream st's config.h vs config.def.h pattern. Tracked file
-# is config-imgui.def.h; the generated config-imgui.h is gitignored
-# and customizations persist across rebuilds.
-
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/config-imgui.h")
-    configure_file(
-        "${CMAKE_SOURCE_DIR}/config-imgui.def.h"
-        "${CMAKE_SOURCE_DIR}/config-imgui.h"
-        COPYONLY
-    )
-endif()
 
 #--------------------------------------------------------------------
 # Dependencies
@@ -166,8 +127,8 @@ endif()
 # Backends and host shells are added per-target below.
 
 set(IMW_WIDGET
-    "${CMAKE_SOURCE_DIR}/st/st.c"
-    "${CMAKE_SOURCE_DIR}/imgui_win.cpp"
+    "${CMAKE_SOURCE_DIR}/emulator.c"
+    "${CMAKE_SOURCE_DIR}/imgui_terminal.cpp"
 )
 
 set(IMW_IMGUI_CORE
@@ -190,7 +151,6 @@ set(IMW_IMGUI_CORE
 function(imw_configure_target target)
     target_include_directories(${target} PRIVATE
         "${CMAKE_SOURCE_DIR}"
-        "${CMAKE_SOURCE_DIR}/st"
         "${IMGUI_DIR}"
         "${IMGUI_DIR}/backends"
         "${IMGUI_DIR}/misc/freetype"
@@ -213,23 +173,20 @@ function(imw_configure_target target)
         # Enables BSD/POSIX legacy functions on glibc; no-op elsewhere.
         target_compile_definitions(${target} PRIVATE _DEFAULT_SOURCE)
     endif()
+    if(WIN32)
+        target_compile_definitions(${target} PRIVATE
+            _WIN32_WINNT=0x0A00 WINVER=0x0A00 NTDDI_VERSION=0x0A000006
+            WIN32_LEAN_AND_MEAN)
+    endif()
 endfunction()
 
 # Stage vcpkg's fontconfig data (fonts.conf + conf.d/) next to the
 # binary on MSVC builds. fontconfig is built by vcpkg with absolute
 # default paths pointing at vcpkg's install dir — the wrong location
-# once the binary moves. imgui_win.cpp's imw_load_fonts() sets
-# FONTCONFIG_PATH to <exe_dir>/fontconfig at runtime; this POST_BUILD
-# copy makes that path real.
-#
-# Triplet-agnostic: ${VCPKG_TARGET_TRIPLET} is set by vcpkg's toolchain
-# to whatever's appropriate (x64-windows, arm64-windows, x86-windows).
+# once the binary moves. imgui_terminal.cpp's Terminal::load_fonts_once()
+# sets FONTCONFIG_PATH to <exe_dir>/fontconfig at runtime; 
 function(imw_msvc_stage_fontconfig target)
     if(MSVC AND DEFINED VCPKG_TARGET_TRIPLET)
-        # vcpkg ships the runtime fontconfig data at etc/fonts/
-        # (containing fonts.conf + conf.d/). The share/fontconfig/
-        # path holds only metadata (copyright, .conf.avail templates,
-        # CMake wrappers) — NOT the runtime config.
         set(_fc_src
             "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/etc/fonts")
         if(EXISTS "${_fc_src}")
@@ -274,14 +231,7 @@ endif()
 #====================================================================
 # Test harnesses — headless, no GLFW, no GPU backend
 #====================================================================
-# Same emulator + widget as the production binaries; the harness main
-# replaces the host shell. fontconfig + freetype are still needed
-# because imgui_win.cpp's font loader uses them.
-#
-# POSIX only. The harness sources use forkpty / openpty / SIGCHLD /
-# unistd.h directly with no Windows abstractions; on Windows the
-# build CI just produces the GLFW app, not the harness binaries.
-
+# Same emulator + widget as the production binaries
 if(NOT WIN32)
     foreach(harness IN ITEMS core input)
         set(t "test_${harness}")
@@ -304,9 +254,6 @@ endif()
 #====================================================================
 # Metal renderer host (macOS only)
 #====================================================================
-# Same widget, GLFW for windowing, Metal for the renderer instead of
-# OpenGL. Demonstrates the renderer-agnostic principle.
-
 if(APPLE)
     add_executable(imgui_terminal_metal
         ${IMW_WIDGET}
@@ -328,9 +275,6 @@ endif()
 #====================================================================
 # Vulkan renderer host — only built if a Vulkan SDK is present
 #====================================================================
-# Cross-platform; we silently skip it when the SDK isn't installed
-# rather than failing the whole configure.
-
 find_package(Vulkan QUIET)
 if(Vulkan_FOUND)
     add_executable(imgui_terminal_vulkan
@@ -363,10 +307,6 @@ endif()
 #====================================================================
 # Native macOS client — Cocoa + Metal, no GLFW
 #====================================================================
-# Replaces GLFW with native Cocoa windowing while keeping the same
-# widget + emulator. Demonstrates the cross-platform widget API
-# is genuinely renderer- and host-agnostic.
-
 if(APPLE)
     add_executable(p_osx MACOSX_BUNDLE
         ${IMW_WIDGET}
@@ -390,7 +330,7 @@ if(APPLE)
         "-framework QuartzCore" "-framework GameController"
         "-framework IOKit"   "-framework CoreVideo"
     )
-    # rgb.txt resolution: imgui_win.cpp searches <exe_dir>/rgb.txt as one
+    # rgb.txt resolution: imgui_terminal.cpp searches <exe_dir>/rgb.txt as one
     # of its fallbacks. Drop a copy beside the binary inside the bundle
     # so the GUI-launched app (CWD=/) finds it without widget changes.
     add_custom_command(TARGET p_osx POST_BUILD

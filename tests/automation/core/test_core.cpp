@@ -43,13 +43,14 @@
 #include "imgui.h"
 #include "../test_setup.h"
 
-extern "C" {
-#include "st.h"
-}
+#include "imgui_terminal.h"
 
-extern void term_init(int cols, int rows, char **argv);
-extern void term_dump_json(FILE *out);
-
+/*
+	Terminal instance owned at file scope so the atexit handler can dump
+	state without juggling a pointer through main(). The dump path is
+	independently global since it's set during arg parsing.
+*/
+static Terminal g_term;
 static const char *g_output_path = NULL;
 
 static void
@@ -57,34 +58,31 @@ dump_atexit(void)
 {
 	if (!g_output_path)
 		return;
-	/*  Final redraw() so imw_row_ops reflects the post-processing
-	    state of Term, not whatever was cached partway through.  */
-	redraw();
 	FILE *f = fopen(g_output_path, "w");
-	if (!f) {
-		fprintf(stderr, "test_core: fopen %s: %s\n",
-		    g_output_path, strerror(errno));
+	if (!f)
+	{
+		fprintf(stderr, "test_core: fopen %s: %s\n", g_output_path, strerror(errno));
 		return;
 	}
-	term_dump_json(f);
+	g_term.dump_json(f);
 	fclose(f);
 }
 
 int
 main(int argc, char **argv)
 {
-	const char *input_path  = NULL;
+	const char *input_path = NULL;
 	const char *output_path = NULL;
-	for (int i = 1; i < argc; i++) {
+	for (int i = 1; i < argc; i++)
+	{
 		if (!strcmp(argv[i], "--input") && i + 1 < argc)
 			input_path = argv[++i];
 		else if (!strcmp(argv[i], "--output") && i + 1 < argc)
 			output_path = argv[++i];
 	}
-	if (!input_path || !output_path) {
-		fprintf(stderr,
-		    "usage: %s --input <script.sh> --output <state.json>\n",
-		    argv[0]);
+	if (!input_path || !output_path)
+	{
+		fprintf(stderr, "usage: %s --input <script.sh> --output <state.json>\n", argv[0]);
 		return 1;
 	}
 
@@ -92,7 +90,7 @@ main(int argc, char **argv)
 	    inside setup_test_env would invalidate them. Resolve to
 	    absolute first.  */
 	static char input_abs[PATH_MAX], output_abs[PATH_MAX];
-	input_path  = make_path_absolute(input_path,  input_abs,  sizeof input_abs);
+	input_path = make_path_absolute(input_path, input_abs, sizeof input_abs);
 	output_path = make_path_absolute(output_path, output_abs, sizeof output_abs);
 
 	g_output_path = output_path;
@@ -107,20 +105,22 @@ main(int argc, char **argv)
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 
-	char *bash_path = (char *)find_bash();
-	char nop[]  = "--noprofile";
+	char *bash_path = (char *) find_bash();
+	char nop[] = "--noprofile";
 	char norc[] = "--norc";
-	char *child_argv[] = { bash_path, nop, norc, (char *)input_path, NULL };
+	char *child_argv[] = {bash_path, nop, norc, (char *) input_path, NULL};
 
-	term_init(80, 24, child_argv);
+	g_term.init(80, 24, child_argv);
 
-	/*  Override st.c's SIGCHLD handler. See file header for why.  */
+	/*  Override emulator.c's SIGCHLD handler. See file header for why.  */
 	signal(SIGCHLD, SIG_IGN);
 
-	/*  Pump until ttyread() hits EOF and calls exit(0) — which fires
-	    dump_atexit. This loop never returns normally.  */
-	for (;;)
-		ttyread();
+	/*  Drain until ttyread() returns 0 (EOF — child closed the PTY). */
+	while (g_term.ttyread() > 0)
+		;
 
-	return 0;  /*  unreachable  */
+	/*  atexit handler writes the JSON snapshot. dump_json reissues a
+	    full redraw so the per-row cache reflects the post-processing
+	    state of Term, not whatever was cached partway through. */
+	return 0;
 }

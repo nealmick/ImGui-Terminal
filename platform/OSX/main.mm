@@ -22,18 +22,14 @@
 #include "imgui_impl_osx.h"
 #include "imgui_impl_metal.h"
 
-/* Public API of imgui_win.cpp (the renderer-agnostic terminal widget).
-   C++ linkage — defined as plain C++, not extern "C". term_draw_canvas
-   renders into the *current* ImGui window (no Begin/End of its own), so
-   this shell can pin it to the NSWindow with no chrome. Focus is
-   standard ImGui IsItemFocused() on the canvas's InvisibleButton; the
-   shell calls SetKeyboardFocusHere() each frame to keep that focus on
-   the canvas (there's nothing else to focus in a pinned window). */
-extern void term_init(int cols, int rows, char **argv);
-extern void term_draw_canvas(void);
-extern void term_shutdown(void);
-extern void term_set_transparent(bool on);
-extern bool term_get_transparent(void);
+#include "imgui_terminal.h"
+
+/*
+	The Terminal instance is owned at file scope so the view-controller,
+	menu actions, and the run-loop teardown all see the same object. One
+	terminal per native client — no point hiding it inside @property.
+*/
+static Terminal g_term;
 
 /*
 	View controller wraps the MTKView and lets MTKView's CADisplayLink
@@ -41,8 +37,8 @@ extern bool term_get_transparent(void);
 	(per-frame draw) and NSWindowDelegate (clean shutdown on close).
 */
 @interface AppViewController : NSViewController <MTKViewDelegate, NSWindowDelegate>
-@property (nonatomic, strong) id<MTLDevice>       device;
-@property (nonatomic, strong) id<MTLCommandQueue> commandQueue;
+@property(nonatomic, strong) id<MTLDevice> device;
+@property(nonatomic, strong) id<MTLCommandQueue> commandQueue;
 @end
 
 @implementation AppViewController
@@ -51,9 +47,10 @@ extern bool term_get_transparent(void);
 {
 	self = [super initWithNibName:nil bundle:nil];
 
-	_device       = MTLCreateSystemDefaultDevice();
+	_device = MTLCreateSystemDefaultDevice();
 	_commandQueue = [_device newCommandQueue];
-	if (!_device) {
+	if (!_device)
+	{
 		NSLog(@"Metal is not supported on this device");
 		abort();
 	}
@@ -75,18 +72,18 @@ extern bool term_get_transparent(void);
 
 - (void)loadView
 {
-	MTKView *view = [[MTKView alloc] initWithFrame:CGRectMake(0, 0, 1200, 800)
-	                                        device:_device];
+	MTKView *view = [[MTKView alloc] initWithFrame:CGRectMake(0, 0, 1200, 800) device:_device];
 	view.clearColor = MTLClearColorMake(0.05, 0.05, 0.05, 1.0);
-    const char *home = getenv("HOME");
-	if (home) {
+	const char *home = getenv("HOME");
+	if (home)
+	{
 		chdir(home);
 	}
 
 	/* Force the app bundle to know about Homebrew and standard local bins */
 	const char *current_path = getenv("PATH");
-	NSString *new_path = [NSString stringWithFormat:@"/opt/homebrew/bin:/usr/local/bin:%s", 
-	                                                current_path ? current_path : "/usr/bin:/bin"];
+	NSString *new_path = [NSString stringWithFormat:@"/opt/homebrew/bin:/usr/local/bin:%s",
+	    current_path ? current_path : "/usr/bin:/bin"];
 	setenv("PATH", [new_path UTF8String], 1);
 	/* Pin the display link to the panel's refresh rate. Default of 60
 	   makes ProMotion drop to its 48Hz adaptive bin; bumping past the
@@ -101,7 +98,7 @@ extern bool term_get_transparent(void);
 {
 	[super viewDidLoad];
 
-	MTKView *mtkView = (MTKView *)self.view;
+	MTKView *mtkView = (MTKView *) self.view;
 	mtkView.delegate = self;
 
 	/* Hand the platform backend the NSView; it installs an NSEvent
@@ -111,12 +108,12 @@ extern bool term_get_transparent(void);
 	/* Spin up the terminal core (forks the PTY, default $SHELL with NULL
 	   argv). 80x24 is just an initial cell grid — the widget resizes
 	   itself to whatever pixel area Begin/End gives it. */
-	term_init(80, 24, NULL);
+	g_term.init(80, 24, NULL);
 
 	/* Default to transparent canvas on macOS — the MTKView clearColor
 	   shows through, so the terminal blends with the window chrome.
 	   Toggle from View → Enable/Disable Transparency. */
-	term_set_transparent(true);
+	g_term.set_transparent(true);
 }
 
 - (void)viewWillAppear
@@ -127,7 +124,7 @@ extern bool term_get_transparent(void);
 
 - (void)windowWillClose:(NSNotification *)notification
 {
-	term_shutdown();
+	g_term.shutdown();
 	ImGui_ImplMetal_Shutdown();
 	ImGui_ImplOSX_Shutdown();
 	ImGui::DestroyContext();
@@ -142,20 +139,22 @@ extern bool term_get_transparent(void);
 
 - (void)drawInMTKView:(MTKView *)view
 {
-	@autoreleasepool {
+	@autoreleasepool
+	{
 		ImGuiIO &io = ImGui::GetIO();
 		io.DisplaySize.x = view.bounds.size.width;
 		io.DisplaySize.y = view.bounds.size.height;
 
-		CGFloat scale = view.window.screen.backingScaleFactor
-		                ?: NSScreen.mainScreen.backingScaleFactor;
+		CGFloat scale =
+		    view.window.screen.backingScaleFactor ?: NSScreen.mainScreen.backingScaleFactor;
 		io.DisplayFramebufferScale = ImVec2(scale, scale);
 
-		id<MTLCommandBuffer>     cmdBuf   = [self.commandQueue commandBuffer];
+		id<MTLCommandBuffer> cmdBuf = [self.commandQueue commandBuffer];
 		MTLRenderPassDescriptor *passDesc = view.currentRenderPassDescriptor;
 
 		/* nil when occluded / off-screen — commit empty and skip. */
-		if (passDesc == nil) {
+		if (passDesc == nil)
+		{
 			[cmdBuf commit];
 			return;
 		}
@@ -174,18 +173,20 @@ extern bool term_get_transparent(void);
 		ImGuiViewport *vp = ImGui::GetMainViewport();
 		const float pad = 8.0f;
 		ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + pad, vp->WorkPos.y + pad));
-		ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x - pad * 2.0f, vp->WorkSize.y - pad * 2.0f));
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,    ImVec2(0, 0));
+		ImGui::SetNextWindowSize(
+		    ImVec2(vp->WorkSize.x - pad * 2.0f, vp->WorkSize.y - pad * 2.0f));
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding,   0.0f);
-		ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar
-		                       | ImGuiWindowFlags_NoResize
-		                       | ImGuiWindowFlags_NoMove
-		                       | ImGuiWindowFlags_NoCollapse
-		                       | ImGuiWindowFlags_NoSavedSettings;
-		if (ImGui::Begin("##term_host", NULL, flags)) {
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+		ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+					 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+					 ImGuiWindowFlags_NoSavedSettings;
+		if (ImGui::Begin("##term_host", NULL, flags))
+		{
 			ImGui::SetKeyboardFocusHere();
-			term_draw_canvas();
+			g_term.draw_canvas();
+			if (!g_term.is_alive())
+				[NSApp terminate:nil];
 		}
 		ImGui::End();
 		ImGui::PopStyleVar(3);
@@ -207,7 +208,7 @@ extern bool term_get_transparent(void);
 /* AppDelegate -------------------------------------------------------- */
 
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSMenuDelegate>
-@property (nonatomic, strong) NSWindow *window;
+@property(nonatomic, strong) NSWindow *window;
 @end
 
 @implementation AppDelegate
@@ -239,9 +240,7 @@ extern bool term_get_transparent(void);
 	NSMenuItem *appItem = [[NSMenuItem alloc] init];
 	[mainMenu addItem:appItem];
 	NSMenu *appMenu = [[NSMenu alloc] init];
-	[appMenu addItemWithTitle:@"Quit"
-	                   action:@selector(terminate:)
-	            keyEquivalent:@"q"];
+	[appMenu addItemWithTitle:@"Quit" action:@selector(terminate:) keyEquivalent:@"q"];
 	appItem.submenu = appMenu;
 
 	/* View menu */
@@ -255,10 +254,9 @@ extern bool term_get_transparent(void);
 		-menuNeedsUpdate:. Mirrors Finder's "Hide Toolbar/Show Toolbar"
 		idiom; avoids the checkmark column entirely.
 	*/
-	NSMenuItem *transparent =
-	    [viewMenu addItemWithTitle:@"Enable Transparency"
-	                        action:@selector(toggleTransparent:)
-	                 keyEquivalent:@""];
+	NSMenuItem *transparent = [viewMenu addItemWithTitle:@"Enable Transparency"
+						      action:@selector(toggleTransparent:)
+					       keyEquivalent:@""];
 	transparent.target = self;
 	viewItem.submenu = viewMenu;
 
@@ -267,19 +265,18 @@ extern bool term_get_transparent(void);
 
 - (instancetype)init
 {
-	if ((self = [super init])) {
+	if ((self = [super init]))
+	{
 		AppViewController *vc = [[AppViewController alloc] init];
 
-		NSUInteger style = NSWindowStyleMaskTitled
-		                 | NSWindowStyleMaskClosable
-		                 | NSWindowStyleMaskResizable
-		                 | NSWindowStyleMaskMiniaturizable;
+		NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+				   NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable;
 
 		_window = [[NSWindow alloc] initWithContentRect:NSZeroRect
-		                                      styleMask:style
-		                                        backing:NSBackingStoreBuffered
-		                                          defer:NO];
-		_window.title                 = @"st-imgui (cocoa + metal)";
+						      styleMask:style
+							backing:NSBackingStoreBuffered
+							  defer:NO];
+		_window.title = @"st-imgui (cocoa + metal)";
 		_window.contentViewController = vc;
 		[_window center];
 		[_window makeKeyAndOrderFront:self];
@@ -293,7 +290,7 @@ extern bool term_get_transparent(void);
 
 - (void)toggleTransparent:(NSMenuItem *)sender
 {
-	term_set_transparent(!term_get_transparent());
+	g_term.set_transparent(!g_term.is_transparent());
 }
 
 /*
@@ -303,10 +300,12 @@ extern bool term_get_transparent(void);
 */
 - (void)menuNeedsUpdate:(NSMenu *)menu
 {
-	for (NSMenuItem *item in menu.itemArray) {
-		if (item.action == @selector(toggleTransparent:)) {
-			item.title = term_get_transparent() ? @"Disable Transparency"
-			                                    : @"Enable Transparency";
+	for (NSMenuItem *item in menu.itemArray)
+	{
+		if (item.action == @selector(toggleTransparent:))
+		{
+			item.title = g_term.is_transparent() ? @"Disable Transparency"
+							     : @"Enable Transparency";
 		}
 	}
 }
@@ -318,12 +317,13 @@ extern bool term_get_transparent(void);
 int
 main(int, const char **)
 {
-	@autoreleasepool {
+	@autoreleasepool
+	{
 		/* Disable "Press and Hold" for this app to ensure standard key
 		   repeats work (holding 'j' sends repeated 'j' chars instead
 		   of showing the accent picker). Matches GLFW/SDL behavior. */
 		[[NSUserDefaults standardUserDefaults] setBool:NO
-		                                       forKey:@"ApplePressAndHoldEnabled"];
+							forKey:@"ApplePressAndHoldEnabled"];
 
 		[NSApplication sharedApplication];
 		[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
