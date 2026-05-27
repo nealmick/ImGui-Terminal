@@ -63,22 +63,27 @@
 #include "imgui.h"
 #include "../test_setup.h"
 
-extern "C" {
-#include "st.h"
-}
+#include "imgui_terminal.h"
 
-extern void term_init(int cols, int rows, char **argv);
-extern void term_draw_canvas(void);
-extern void term_dump_json(FILE *out);
+/*  Single Terminal owned at file scope so the per-frame loop and the
+    atexit dump handler see the same instance. */
+static Terminal g_term;
 
 /*  --- event schedule ----------------------------------------------- */
 
-struct Event {
-	enum Kind { KEY_DOWN, KEY_UP, CHAR, SET_CLIPBOARD };
-	Kind         kind;
-	ImGuiKey     key;   /*  KEY_*; chord-mods like ImGuiMod_Ctrl too  */
-	unsigned int ch;    /*  CHAR  */
-	std::string  text;  /*  SET_CLIPBOARD  */
+struct Event
+{
+	enum Kind
+	{
+		KEY_DOWN,
+		KEY_UP,
+		CHAR,
+		SET_CLIPBOARD
+	};
+	Kind kind;
+	ImGuiKey key;	  /*  KEY_*; chord-mods like ImGuiMod_Ctrl too  */
+	unsigned int ch;  /*  CHAR  */
+	std::string text; /*  SET_CLIPBOARD  */
 };
 
 static std::vector<std::vector<Event>> g_schedule;
@@ -86,61 +91,85 @@ static std::vector<std::vector<Event>> g_schedule;
 static void
 sched_at(int frame, Event ev)
 {
-	if ((int)g_schedule.size() <= frame)
+	if ((int) g_schedule.size() <= frame)
 		g_schedule.resize(frame + 1);
 	g_schedule[frame].push_back(ev);
 }
 
 /*  --- key-name lookup --------------------------------------------- */
 
-struct KeyName {
+struct KeyName
+{
 	const char *name;
-	ImGuiKey    key;
+	ImGuiKey key;
 };
 
 static const KeyName key_table[] = {
-	/*  Common control keys  */
-	{ "Enter",      ImGuiKey_Enter      },
-	{ "Return",     ImGuiKey_Enter      },
-	{ "Backspace",  ImGuiKey_Backspace  },
-	{ "Tab",        ImGuiKey_Tab        },
-	{ "Escape",     ImGuiKey_Escape     },
-	{ "Space",      ImGuiKey_Space      },
-	{ "Delete",     ImGuiKey_Delete     },
-	{ "Insert",     ImGuiKey_Insert     },
-	{ "Home",       ImGuiKey_Home       },
-	{ "End",        ImGuiKey_End        },
-	{ "PageUp",     ImGuiKey_PageUp     },
-	{ "PageDown",   ImGuiKey_PageDown   },
+    /*  Common control keys  */
+    {"Enter", ImGuiKey_Enter},
+    {"Return", ImGuiKey_Enter},
+    {"Backspace", ImGuiKey_Backspace},
+    {"Tab", ImGuiKey_Tab},
+    {"Escape", ImGuiKey_Escape},
+    {"Space", ImGuiKey_Space},
+    {"Delete", ImGuiKey_Delete},
+    {"Insert", ImGuiKey_Insert},
+    {"Home", ImGuiKey_Home},
+    {"End", ImGuiKey_End},
+    {"PageUp", ImGuiKey_PageUp},
+    {"PageDown", ImGuiKey_PageDown},
 
-	/*  Arrows  */
-	{ "Up",         ImGuiKey_UpArrow    },
-	{ "Down",       ImGuiKey_DownArrow  },
-	{ "Left",       ImGuiKey_LeftArrow  },
-	{ "Right",      ImGuiKey_RightArrow },
-	{ "UpArrow",    ImGuiKey_UpArrow    },
-	{ "DownArrow",  ImGuiKey_DownArrow  },
-	{ "LeftArrow",  ImGuiKey_LeftArrow  },
-	{ "RightArrow", ImGuiKey_RightArrow },
+    /*  Arrows  */
+    {"Up", ImGuiKey_UpArrow},
+    {"Down", ImGuiKey_DownArrow},
+    {"Left", ImGuiKey_LeftArrow},
+    {"Right", ImGuiKey_RightArrow},
+    {"UpArrow", ImGuiKey_UpArrow},
+    {"DownArrow", ImGuiKey_DownArrow},
+    {"LeftArrow", ImGuiKey_LeftArrow},
+    {"RightArrow", ImGuiKey_RightArrow},
 
-	/*  Function keys  */
-	{ "F1",  ImGuiKey_F1  }, { "F2",  ImGuiKey_F2  },
-	{ "F3",  ImGuiKey_F3  }, { "F4",  ImGuiKey_F4  },
-	{ "F5",  ImGuiKey_F5  }, { "F6",  ImGuiKey_F6  },
-	{ "F7",  ImGuiKey_F7  }, { "F8",  ImGuiKey_F8  },
-	{ "F9",  ImGuiKey_F9  }, { "F10", ImGuiKey_F10 },
-	{ "F11", ImGuiKey_F11 }, { "F12", ImGuiKey_F12 },
+    /*  Function keys  */
+    {"F1", ImGuiKey_F1},
+    {"F2", ImGuiKey_F2},
+    {"F3", ImGuiKey_F3},
+    {"F4", ImGuiKey_F4},
+    {"F5", ImGuiKey_F5},
+    {"F6", ImGuiKey_F6},
+    {"F7", ImGuiKey_F7},
+    {"F8", ImGuiKey_F8},
+    {"F9", ImGuiKey_F9},
+    {"F10", ImGuiKey_F10},
+    {"F11", ImGuiKey_F11},
+    {"F12", ImGuiKey_F12},
 
-	/*  Letters and digits — used for chords like Ctrl+C, Ctrl+Shift+V  */
-	{ "A", ImGuiKey_A }, { "B", ImGuiKey_B }, { "C", ImGuiKey_C },
-	{ "D", ImGuiKey_D }, { "E", ImGuiKey_E }, { "F", ImGuiKey_F },
-	{ "G", ImGuiKey_G }, { "H", ImGuiKey_H }, { "I", ImGuiKey_I },
-	{ "J", ImGuiKey_J }, { "K", ImGuiKey_K }, { "L", ImGuiKey_L },
-	{ "M", ImGuiKey_M }, { "N", ImGuiKey_N }, { "O", ImGuiKey_O },
-	{ "P", ImGuiKey_P }, { "Q", ImGuiKey_Q }, { "R", ImGuiKey_R },
-	{ "S", ImGuiKey_S }, { "T", ImGuiKey_T }, { "U", ImGuiKey_U },
-	{ "V", ImGuiKey_V }, { "W", ImGuiKey_W }, { "X", ImGuiKey_X },
-	{ "Y", ImGuiKey_Y }, { "Z", ImGuiKey_Z },
+    /*  Letters and digits — used for chords like Ctrl+C, Ctrl+Shift+V  */
+    {"A", ImGuiKey_A},
+    {"B", ImGuiKey_B},
+    {"C", ImGuiKey_C},
+    {"D", ImGuiKey_D},
+    {"E", ImGuiKey_E},
+    {"F", ImGuiKey_F},
+    {"G", ImGuiKey_G},
+    {"H", ImGuiKey_H},
+    {"I", ImGuiKey_I},
+    {"J", ImGuiKey_J},
+    {"K", ImGuiKey_K},
+    {"L", ImGuiKey_L},
+    {"M", ImGuiKey_M},
+    {"N", ImGuiKey_N},
+    {"O", ImGuiKey_O},
+    {"P", ImGuiKey_P},
+    {"Q", ImGuiKey_Q},
+    {"R", ImGuiKey_R},
+    {"S", ImGuiKey_S},
+    {"T", ImGuiKey_T},
+    {"U", ImGuiKey_U},
+    {"V", ImGuiKey_V},
+    {"W", ImGuiKey_W},
+    {"X", ImGuiKey_X},
+    {"Y", ImGuiKey_Y},
+    {"Z", ImGuiKey_Z},
 };
 
 static ImGuiKey
@@ -165,10 +194,14 @@ lookup_key(const char *name)
 static ImGuiKey
 mod_for_lr_key(ImGuiKey k)
 {
-	if (k == ImGuiKey_LeftCtrl  || k == ImGuiKey_RightCtrl)  return ImGuiMod_Ctrl;
-	if (k == ImGuiKey_LeftShift || k == ImGuiKey_RightShift) return ImGuiMod_Shift;
-	if (k == ImGuiKey_LeftAlt   || k == ImGuiKey_RightAlt)   return ImGuiMod_Alt;
-	if (k == ImGuiKey_LeftSuper || k == ImGuiKey_RightSuper) return ImGuiMod_Super;
+	if (k == ImGuiKey_LeftCtrl || k == ImGuiKey_RightCtrl)
+		return ImGuiMod_Ctrl;
+	if (k == ImGuiKey_LeftShift || k == ImGuiKey_RightShift)
+		return ImGuiMod_Shift;
+	if (k == ImGuiKey_LeftAlt || k == ImGuiKey_RightAlt)
+		return ImGuiMod_Alt;
+	if (k == ImGuiKey_LeftSuper || k == ImGuiKey_RightSuper)
+		return ImGuiMod_Super;
 	return ImGuiKey_None;
 }
 
@@ -188,16 +221,24 @@ lookup_mod(const char *name)
 	    LeftCtrl elsewhere. The dispatcher sees the same io.KeyCtrl=true
 	    state in either case — production behavior unchanged.  */
 #if defined(__APPLE__)
-	if (strcasecmp(name, "Ctrl")  == 0) return ImGuiKey_LeftSuper;
-	if (strcasecmp(name, "Super") == 0) return ImGuiKey_LeftCtrl;
-	if (strcasecmp(name, "Cmd")   == 0) return ImGuiKey_LeftCtrl;
+	if (strcasecmp(name, "Ctrl") == 0)
+		return ImGuiKey_LeftSuper;
+	if (strcasecmp(name, "Super") == 0)
+		return ImGuiKey_LeftCtrl;
+	if (strcasecmp(name, "Cmd") == 0)
+		return ImGuiKey_LeftCtrl;
 #else
-	if (strcasecmp(name, "Ctrl")  == 0) return ImGuiKey_LeftCtrl;
-	if (strcasecmp(name, "Super") == 0) return ImGuiKey_LeftSuper;
-	if (strcasecmp(name, "Cmd")   == 0) return ImGuiKey_LeftSuper;
+	if (strcasecmp(name, "Ctrl") == 0)
+		return ImGuiKey_LeftCtrl;
+	if (strcasecmp(name, "Super") == 0)
+		return ImGuiKey_LeftSuper;
+	if (strcasecmp(name, "Cmd") == 0)
+		return ImGuiKey_LeftSuper;
 #endif
-	if (strcasecmp(name, "Shift") == 0) return ImGuiKey_LeftShift;
-	if (strcasecmp(name, "Alt")   == 0) return ImGuiKey_LeftAlt;
+	if (strcasecmp(name, "Shift") == 0)
+		return ImGuiKey_LeftShift;
+	if (strcasecmp(name, "Alt") == 0)
+		return ImGuiKey_LeftAlt;
 	return ImGuiKey_None;
 }
 
@@ -207,7 +248,8 @@ static int
 parse_events(const char *path)
 {
 	FILE *f = fopen(path, "r");
-	if (!f) {
+	if (!f)
+	{
 		fprintf(stderr, "test_input: fopen %s: %s\n", path, strerror(errno));
 		return -1;
 	}
@@ -215,115 +257,202 @@ parse_events(const char *path)
 	int frame = 0;
 	char line[1024];
 	int lineno = 0;
-	while (fgets(line, sizeof line, f)) {
+	while (fgets(line, sizeof line, f))
+	{
 		lineno++;
 		size_t n = strlen(line);
-		while (n > 0 && (line[n-1] == '\n' || line[n-1] == '\r' || line[n-1] == ' '))
+		while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r' || line[n - 1] == ' '))
 			line[--n] = '\0';
 
 		char *p = line;
-		while (*p == ' ' || *p == '\t') p++;
-		if (*p == '\0' || *p == '#') continue;
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (*p == '\0' || *p == '#')
+			continue;
 
 		char *cmd = p;
-		while (*p && *p != ' ' && *p != '\t') p++;
-		if (*p) { *p++ = '\0'; while (*p == ' ' || *p == '\t') p++; }
+		while (*p && *p != ' ' && *p != '\t')
+			p++;
+		if (*p)
+		{
+			*p++ = '\0';
+			while (*p == ' ' || *p == '\t')
+				p++;
+		}
 		char *arg = p;
 
-		if (strcmp(cmd, "type") == 0) {
+		if (strcmp(cmd, "type") == 0)
+		{
 			/*  Decode UTF-8 byte sequences to codepoints — ImGui's
 			    AddInputCharacter takes a codepoint, not a byte.
 			    Multi-byte sequences in events.txt (é, 中, etc.)
 			    must collapse to one CHAR event per character. */
-			const unsigned char *q = (const unsigned char *)arg;
-			while (*q) {
-				unsigned int cp = 0; int n = 0;
-				if      ((q[0] & 0x80) == 0x00) { cp = q[0]; n = 1; }
-				else if ((q[0] & 0xe0) == 0xc0) { cp = q[0] & 0x1f; n = 2; }
-				else if ((q[0] & 0xf0) == 0xe0) { cp = q[0] & 0x0f; n = 3; }
-				else if ((q[0] & 0xf8) == 0xf0) { cp = q[0] & 0x07; n = 4; }
-				else { q++; continue; }  /*  invalid lead — skip  */
-				for (int k = 1; k < n; k++) {
-					if ((q[k] & 0xc0) != 0x80) { n = 0; break; }
+			const unsigned char *q = (const unsigned char *) arg;
+			while (*q)
+			{
+				unsigned int cp = 0;
+				int n = 0;
+				if ((q[0] & 0x80) == 0x00)
+				{
+					cp = q[0];
+					n = 1;
+				}
+				else if ((q[0] & 0xe0) == 0xc0)
+				{
+					cp = q[0] & 0x1f;
+					n = 2;
+				}
+				else if ((q[0] & 0xf0) == 0xe0)
+				{
+					cp = q[0] & 0x0f;
+					n = 3;
+				}
+				else if ((q[0] & 0xf8) == 0xf0)
+				{
+					cp = q[0] & 0x07;
+					n = 4;
+				}
+				else
+				{
+					q++;
+					continue;
+				} /*  invalid lead — skip  */
+				for (int k = 1; k < n; k++)
+				{
+					if ((q[k] & 0xc0) != 0x80)
+					{
+						n = 0;
+						break;
+					}
 					cp = (cp << 6) | (q[k] & 0x3f);
 				}
-				if (n == 0) { q++; continue; }
+				if (n == 0)
+				{
+					q++;
+					continue;
+				}
 				Event e = {};
 				e.kind = Event::CHAR;
-				e.ch   = cp;
+				e.ch = cp;
 				sched_at(frame, e);
 				frame++;
 				q += n;
 			}
-		} else if (strcmp(cmd, "key") == 0) {
+		}
+		else if (strcmp(cmd, "key") == 0)
+		{
 			ImGuiKey k = lookup_key(arg);
-			if (k == ImGuiKey_None) {
-				fprintf(stderr, "test_input: %s:%d: unknown key '%s'\n",
-				    path, lineno, arg);
-				fclose(f); return -1;
+			if (k == ImGuiKey_None)
+			{
+				fprintf(stderr, "test_input: %s:%d: unknown key '%s'\n", path,
+				    lineno, arg);
+				fclose(f);
+				return -1;
 			}
-			Event d = {}; d.kind = Event::KEY_DOWN; d.key = k;
-			Event u = {}; u.kind = Event::KEY_UP;   u.key = k;
-			sched_at(frame,     d);
+			Event d = {};
+			d.kind = Event::KEY_DOWN;
+			d.key = k;
+			Event u = {};
+			u.kind = Event::KEY_UP;
+			u.key = k;
+			sched_at(frame, d);
 			sched_at(frame + 1, u);
 			frame += 2;
-		} else if (strcmp(cmd, "chord") == 0) {
+		}
+		else if (strcmp(cmd, "chord") == 0)
+		{
 			char *modspec = arg;
-			while (*p && *p != ' ' && *p != '\t') p++;
-			if (*p) { *p++ = '\0'; while (*p == ' ' || *p == '\t') p++; }
+			while (*p && *p != ' ' && *p != '\t')
+				p++;
+			if (*p)
+			{
+				*p++ = '\0';
+				while (*p == ' ' || *p == '\t')
+					p++;
+			}
 			char *keyname = p;
 
 			std::vector<ImGuiKey> mods;
 			char *m = modspec;
-			while (m && *m) {
+			while (m && *m)
+			{
 				char *plus = strchr(m, '+');
-				if (plus) *plus = '\0';
+				if (plus)
+					*plus = '\0';
 				ImGuiKey mk = lookup_mod(m);
-				if (mk == ImGuiKey_None) {
-					fprintf(stderr, "test_input: %s:%d: unknown modifier '%s'\n",
-					    path, lineno, m);
-					fclose(f); return -1;
+				if (mk == ImGuiKey_None)
+				{
+					fprintf(stderr,
+					    "test_input: %s:%d: unknown modifier '%s'\n", path,
+					    lineno, m);
+					fclose(f);
+					return -1;
 				}
 				mods.push_back(mk);
 				m = plus ? plus + 1 : NULL;
 			}
 			ImGuiKey k = lookup_key(keyname);
-			if (k == ImGuiKey_None) {
-				fprintf(stderr, "test_input: %s:%d: unknown key '%s'\n",
-				    path, lineno, keyname);
-				fclose(f); return -1;
+			if (k == ImGuiKey_None)
+			{
+				fprintf(stderr, "test_input: %s:%d: unknown key '%s'\n", path,
+				    lineno, keyname);
+				fclose(f);
+				return -1;
 			}
 			Event ev = {};
 			/*  For each modifier, send BOTH the physical L/R key and
 			    its ImGuiMod_* flag — same shape GLFW backend produces.
 			    Without the ImGuiMod_* event, io.KeyCtrl/Shift/etc.
 			    stays false and Stage 2b/Stage 1 never fire. */
-			for (ImGuiKey mk : mods) {
-				ev = {}; ev.kind = Event::KEY_DOWN; ev.key = mk;
+			for (ImGuiKey mk : mods)
+			{
+				ev = {};
+				ev.kind = Event::KEY_DOWN;
+				ev.key = mk;
 				sched_at(frame, ev);
 				ImGuiKey mflag = mod_for_lr_key(mk);
-				if (mflag != ImGuiKey_None) {
-					ev = {}; ev.kind = Event::KEY_DOWN; ev.key = mflag;
+				if (mflag != ImGuiKey_None)
+				{
+					ev = {};
+					ev.kind = Event::KEY_DOWN;
+					ev.key = mflag;
 					sched_at(frame, ev);
 				}
 			}
-			ev = {}; ev.kind = Event::KEY_DOWN; ev.key = k; sched_at(frame, ev);
-			ev = {}; ev.kind = Event::KEY_UP;   ev.key = k; sched_at(frame + 1, ev);
-			for (ImGuiKey mk : mods) {
-				ev = {}; ev.kind = Event::KEY_UP; ev.key = mk;
+			ev = {};
+			ev.kind = Event::KEY_DOWN;
+			ev.key = k;
+			sched_at(frame, ev);
+			ev = {};
+			ev.kind = Event::KEY_UP;
+			ev.key = k;
+			sched_at(frame + 1, ev);
+			for (ImGuiKey mk : mods)
+			{
+				ev = {};
+				ev.kind = Event::KEY_UP;
+				ev.key = mk;
 				sched_at(frame + 1, ev);
 				ImGuiKey mflag = mod_for_lr_key(mk);
-				if (mflag != ImGuiKey_None) {
-					ev = {}; ev.kind = Event::KEY_UP; ev.key = mflag;
+				if (mflag != ImGuiKey_None)
+				{
+					ev = {};
+					ev.kind = Event::KEY_UP;
+					ev.key = mflag;
 					sched_at(frame + 1, ev);
 				}
 			}
 			frame += 2;
-		} else if (strcmp(cmd, "wait") == 0) {
+		}
+		else if (strcmp(cmd, "wait") == 0)
+		{
 			int n2 = atoi(arg);
-			if (n2 < 0) n2 = 0;
+			if (n2 < 0)
+				n2 = 0;
 			frame += n2;
-		} else if (strcmp(cmd, "clipboard") == 0) {
+		}
+		else if (strcmp(cmd, "clipboard") == 0)
+		{
 			/*  Stage 1 paste tests need ImGui's clipboard primed
 			    before the chord fires. With no backend, ImGui's
 			    SetClipboardText writes an internal buffer that
@@ -333,10 +462,13 @@ parse_events(const char *path)
 			e.text = arg;
 			sched_at(frame, e);
 			frame++;
-		} else {
-			fprintf(stderr, "test_input: %s:%d: unknown directive '%s'\n",
-			    path, lineno, cmd);
-			fclose(f); return -1;
+		}
+		else
+		{
+			fprintf(stderr, "test_input: %s:%d: unknown directive '%s'\n", path, lineno,
+			    cmd);
+			fclose(f);
+			return -1;
 		}
 	}
 	fclose(f);
@@ -348,16 +480,25 @@ parse_events(const char *path)
 static void
 inject_for_frame(int frame)
 {
-	if (frame >= (int)g_schedule.size()) return;
+	if (frame >= (int) g_schedule.size())
+		return;
 	ImGuiIO &io = ImGui::GetIO();
-	for (const Event &e : g_schedule[frame]) {
-		switch (e.kind) {
-		case Event::KEY_DOWN: io.AddKeyEvent(e.key, true);  break;
-		case Event::KEY_UP:   io.AddKeyEvent(e.key, false); break;
-		case Event::CHAR:     io.AddInputCharacter(e.ch);   break;
-		case Event::SET_CLIPBOARD:
-			ImGui::SetClipboardText(e.text.c_str());
-			break;
+	for (const Event &e : g_schedule[frame])
+	{
+		switch (e.kind)
+		{
+			case Event::KEY_DOWN:
+				io.AddKeyEvent(e.key, true);
+				break;
+			case Event::KEY_UP:
+				io.AddKeyEvent(e.key, false);
+				break;
+			case Event::CHAR:
+				io.AddInputCharacter(e.ch);
+				break;
+			case Event::SET_CLIPBOARD:
+				ImGui::SetClipboardText(e.text.c_str());
+				break;
 		}
 	}
 }
@@ -369,15 +510,15 @@ static const char *g_output_path = NULL;
 static void
 dump_atexit(void)
 {
-	if (!g_output_path) return;
-	redraw();
+	if (!g_output_path)
+		return;
 	FILE *f = fopen(g_output_path, "w");
-	if (!f) {
-		fprintf(stderr, "test_input: fopen %s: %s\n",
-		    g_output_path, strerror(errno));
+	if (!f)
+	{
+		fprintf(stderr, "test_input: fopen %s: %s\n", g_output_path, strerror(errno));
 		return;
 	}
-	term_dump_json(f);
+	g_term.dump_json(f);
 	fclose(f);
 }
 
@@ -388,21 +529,22 @@ main(int argc, char **argv)
 {
 	const char *events_path = NULL;
 	const char *output_path = NULL;
-	for (int i = 1; i < argc; i++) {
+	for (int i = 1; i < argc; i++)
+	{
 		if (!strcmp(argv[i], "--events") && i + 1 < argc)
 			events_path = argv[++i];
 		else if (!strcmp(argv[i], "--output") && i + 1 < argc)
 			output_path = argv[++i];
 	}
-	if (!events_path || !output_path) {
-		fprintf(stderr,
-		    "usage: %s --events <events.txt> --output <state.json>\n",
-		    argv[0]);
+	if (!events_path || !output_path)
+	{
+		fprintf(stderr, "usage: %s --events <events.txt> --output <state.json>\n", argv[0]);
 		return 1;
 	}
 
 	int last_frame = parse_events(events_path);
-	if (last_frame < 0) return 2;
+	if (last_frame < 0)
+		return 2;
 
 	/*  Make output_path absolute before chdir, otherwise the
 	    relative path the runner passed becomes invalid.  */
@@ -421,24 +563,25 @@ main(int argc, char **argv)
 	ImGui::CreateContext();
 	ImGuiIO &io = ImGui::GetIO();
 	io.DisplaySize = ImVec2(800, 600);
-	io.DeltaTime   = 1.0f / 60.0f;
+	io.DeltaTime = 1.0f / 60.0f;
 
 	/*  Bash interactive. --noprofile --norc skips /etc/profile and
 	    ~/.bashrc; we'd already pinned PS1 via env but those files
 	    can override it.  */
-	char *bash_path = (char *)find_bash();
-	char nop[]    = "--noprofile";
-	char norc[]   = "--norc";
+	char *bash_path = (char *) find_bash();
+	char nop[] = "--noprofile";
+	char norc[] = "--norc";
 	char dash_i[] = "-i";
-	char *child_argv[] = { bash_path, nop, norc, dash_i, NULL };
-	term_init(80, 24, child_argv);
+	char *child_argv[] = {bash_path, nop, norc, dash_i, NULL};
+	g_term.init(80, 24, child_argv);
 
 	/*  Force-bake the font atlas. With no renderer backend, ImGui
 	    won't lazy-build it from NewFrame and asserts on first text
 	    draw. GetTexDataAsRGBA32 triggers the bake; we discard the
 	    pixels (we never render them).  */
 	{
-		unsigned char *pix; int w, h;
+		unsigned char *pix;
+		int w, h;
 		io.Fonts->GetTexDataAsRGBA32(&pix, &w, &h);
 	}
 
@@ -447,9 +590,11 @@ main(int argc, char **argv)
 	/*  Run a few extra drain frames after the last scheduled event so
 	    bash has time to echo the final keystroke before the dump.  */
 	int total_frames = last_frame + 30;
-	if (total_frames < 5) total_frames = 5;
+	if (total_frames < 5)
+		total_frames = 5;
 
-	for (int frame = 0; frame < total_frames; frame++) {
+	for (int frame = 0; frame < total_frames; frame++)
+	{
 		inject_for_frame(frame);
 		ImGui::NewFrame();
 		/*  Drive the canvas directly inside our own Begin/End so we
@@ -462,16 +607,17 @@ main(int argc, char **argv)
 		ImGui::SetNextWindowSize(ImVec2(800, 500), ImGuiCond_FirstUseEver);
 		ImGui::Begin("Terminal");
 		ImGui::SetKeyboardFocusHere();
-		term_draw_canvas();
+		g_term.draw_canvas();
 		ImGui::End();
 		ImGui::EndFrame();
-		usleep(2000);  /*  ~2ms — let bash echo back  */
+		usleep(2000); /*  ~2ms — let bash echo back  */
 	}
 
 	/*  Final drain after the loop: keep reading until the PTY is
 	    quiet for ~50ms. Mirrors the core client's child-exit drain
 	    but we never quit bash so there's no EOF.  */
-	for (int i = 0; i < 25; i++) {
+	for (int i = 0; i < 25; i++)
+	{
 		usleep(2000);
 		ImGui::NewFrame();
 		/*  Match the geometry term_draw_widget() used to create so the
@@ -480,7 +626,7 @@ main(int argc, char **argv)
 		ImGui::SetNextWindowSize(ImVec2(800, 500), ImGuiCond_FirstUseEver);
 		ImGui::Begin("Terminal");
 		ImGui::SetKeyboardFocusHere();
-		term_draw_canvas();
+		g_term.draw_canvas();
 		ImGui::End();
 		ImGui::EndFrame();
 	}

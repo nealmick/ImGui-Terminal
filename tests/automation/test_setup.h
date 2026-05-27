@@ -32,13 +32,15 @@ find_bash(void)
 {
 	static char path[256];
 	const char *candidates[] = {
-		"/opt/homebrew/bin/bash",  /*  Apple Silicon brew  */
-		"/usr/local/bin/bash",     /*  Intel brew + Linuxbrew  */
-		"/bin/bash",               /*  system fallback (bash 3.2 on macOS)  */
-		NULL,
+	    "/opt/homebrew/bin/bash", /*  Apple Silicon brew  */
+	    "/usr/local/bin/bash",    /*  Intel brew + Linuxbrew  */
+	    "/bin/bash",	      /*  system fallback (bash 3.2 on macOS)  */
+	    NULL,
 	};
-	for (int i = 0; candidates[i]; i++) {
-		if (access(candidates[i], X_OK) == 0) {
+	for (int i = 0; candidates[i]; i++)
+	{
+		if (access(candidates[i], X_OK) == 0)
+		{
 			snprintf(path, sizeof path, "%s", candidates[i]);
 			/*  fprintf(stderr, "test_setup: bash = %s\n", path);  */
 			return path;
@@ -52,27 +54,27 @@ static inline void
 setup_test_env(void)
 {
 	static char homedir[] = "/tmp/imgui_test.XXXXXX";
-	if (!mkdtemp(homedir)) {
-		fprintf(stderr, "test_setup: mkdtemp failed: %s\n",
-		    strerror(errno));
+	if (!mkdtemp(homedir))
+	{
+		fprintf(stderr, "test_setup: mkdtemp failed: %s\n", strerror(errno));
 		exit(2);
 	}
 
-	setenv("PATH",     "/usr/bin:/bin",                 1);
-	setenv("HOME",     homedir,                         1);
-	setenv("PS1",      "$ ",                            1);
-	setenv("PS2",      "> ",                            1);
-	setenv("TERM",     "xterm-256color",                1);
-	setenv("LANG",     "C.UTF-8",                       1);
-	setenv("LC_ALL",   "C.UTF-8",                       1);
-	setenv("TZ",       "UTC",                           1);
-	setenv("INPUTRC",  "/dev/null",                     1);
-	setenv("HISTFILE", "/dev/null",                     1);
-	setenv("BASH_SILENCE_DEPRECATION_WARNING", "1",     1);
+	setenv("PATH", "/usr/bin:/bin", 1);
+	setenv("HOME", homedir, 1);
+	setenv("PS1", "$ ", 1);
+	setenv("PS2", "> ", 1);
+	setenv("TERM", "xterm-256color", 1);
+	setenv("LANG", "C.UTF-8", 1);
+	setenv("LC_ALL", "C.UTF-8", 1);
+	setenv("TZ", "UTC", 1);
+	setenv("INPUTRC", "/dev/null", 1);
+	setenv("HISTFILE", "/dev/null", 1);
+	setenv("BASH_SILENCE_DEPRECATION_WARNING", "1", 1);
 
-	if (chdir(homedir) != 0) {
-		fprintf(stderr, "test_setup: chdir %s: %s\n",
-		    homedir, strerror(errno));
+	if (chdir(homedir) != 0)
+	{
+		fprintf(stderr, "test_setup: chdir %s: %s\n", homedir, strerror(errno));
 		exit(2);
 	}
 }
@@ -84,12 +86,14 @@ setup_test_env(void)
 static inline const char *
 make_path_absolute(const char *p, char *out, size_t n)
 {
-	if (p[0] == '/') {
+	if (p[0] == '/')
+	{
 		snprintf(out, n, "%s", p);
 		return out;
 	}
 	char cwd[PATH_MAX];
-	if (!getcwd(cwd, sizeof cwd)) {
+	if (!getcwd(cwd, sizeof cwd))
+	{
 		fprintf(stderr, "test_setup: getcwd: %s\n", strerror(errno));
 		exit(2);
 	}
