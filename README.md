@@ -3,8 +3,9 @@
 An ImGui-native terminal emulator based on [suckless st][st]. Replaces st's X11/Xft frontend (`x.c`) with an ImGui-based adapter that runs renderer agnostic — GLFW+OpenGL, Vulkan, Metal, or any other ImGui backend.
 
 **Cross-renderer portability.** st is tied to X11. wherever ImGui runs this terminal runs.  
-**Composable as a widget.** The terminal is exposed as `term_init` / 
-`term_draw_widget` / `term_shutdown`. 
+**Composable as a widget.** The terminal is exposed as `Terminal::init` /
+`Terminal::draw_widget` / `Terminal::shutdown`. For direct control,
+`Terminal::draw_canvas` renders into the current ImGui window.
 
 ## Build
 
