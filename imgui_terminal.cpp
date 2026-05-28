@@ -1495,6 +1495,15 @@ Terminal::dispatch_mouse()
 		dispatch_mouse_select();
 		dispatch_mouse_mshortcuts();
 	}
+
+	for (int b = 0; b < 5; b++)
+	{
+		if (io.MouseDown[b])
+		{
+			m_changed = true;
+			break;
+		}
+	}
 }
 
 /* ----------------------------------------------------------------------
@@ -1515,6 +1524,13 @@ void
 Terminal::set_transparent(bool on)
 {
 	transparent_bg = on;
+	m_changed = true;
+}
+
+void
+Terminal::set_retained(bool on)
+{
+	m_retained = on;
 }
 
 size_t
@@ -1619,7 +1635,7 @@ Terminal::draw_canvas()
 		draw(&e);
 
 	bool changed = m_changed;
-	if (changed)
+	if (changed || !m_retained)
 	{
 		for (size_t y = 0; y < row_ops.size(); y++)
 			replay_ops(row_ops[y], canvas_pos, dl);

@@ -112,6 +112,7 @@ public:
 	void shutdown();
 	bool draw_canvas();
 	void draw_widget(const char *id);
+	void set_retained(bool on);
 	void dump_json(std::FILE *out);
 	void set_transparent(bool on);
 	bool is_transparent() const;
@@ -159,6 +160,7 @@ private:
 	double blink_last_toggle_ms = 0.0;
 	bool metrics_derived = false;
 	bool m_changed = true; /* force first frame */
+	bool m_retained = false;
 
 	// Per-frame render context
 	ImVec2 canvas_pos{};

@@ -40,6 +40,7 @@ static Terminal g_term;
 	ImGuiIO &io = ImGui::GetIO();
 
 	ImGui::StyleColorsDark();
+	ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = ImVec4(0, 0, 0, 0);
 
 	/* Retina / HiDPI font density tracking — see main_example_glfw_gl.cpp
 	   for rationale. The Metal renderer backend honors RendererHasTextures. */
@@ -78,6 +79,7 @@ static Terminal g_term;
 	
 	ImGui_ImplOSX_Init(self.view);
 	g_term.init(80, 24, NULL);
+	g_term.set_retained(true);
 	g_term.set_transparent(true);
 }
 
@@ -131,12 +133,14 @@ static Terminal g_term;
 
 		ImGuiViewport *vp = ImGui::GetMainViewport();
 		const float pad = 8.0f;
-		ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + pad, vp->WorkPos.y + pad));
+		const float title_height = 38.0f;
+		ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + pad, vp->WorkPos.y + title_height));
 		ImGui::SetNextWindowSize(
-		    ImVec2(vp->WorkSize.x - pad * 2.0f, vp->WorkSize.y - pad * 2.0f));
+		    ImVec2(vp->WorkSize.x - pad * 2.0f,
+			   vp->WorkSize.y - title_height - pad));
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
 		ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
 					 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
 					 ImGuiWindowFlags_NoSavedSettings;
@@ -229,12 +233,15 @@ static Terminal g_term;
 		AppViewController *vc = [[AppViewController alloc] init];
 
 		NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-				   NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable;
+				   NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable |
+				   NSWindowStyleMaskFullSizeContentView;
 
 		_window = [[NSWindow alloc] initWithContentRect:NSZeroRect
 						      styleMask:style
 							backing:NSBackingStoreBuffered
 							  defer:NO];
+		_window.titlebarAppearsTransparent = YES;
+		_window.titleVisibility = NSWindowTitleHidden;
 		_window.title = @"st-imgui (cocoa + metal)";
 		_window.contentViewController = vc;
 		[_window center];
