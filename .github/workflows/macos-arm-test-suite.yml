@@ -84,3 +84,21 @@ jobs:
       - name: input / utf8_typing
         if: success() || failure()
         run: ./build/test_input --events tests/automation/input/utf8_typing/events.txt --output /tmp/actual.json && diff -q tests/automation/input/utf8_typing/expected.json /tmp/actual.json
+
+      - name: Package app
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          APP="build/p_osx.app"
+          DMG="ImguiTerminal.dmg"
+          mkdir -p dist
+          cp -R "$APP" dist/
+          hdiutil create -volname ImguiTerminal -srcfolder dist -ov -format UDZO "$DMG"
+
+      - name: Create release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "latest"
+          tag_name: "latest"
+          files: ImguiTerminal.dmg
+          generate_release_notes: true

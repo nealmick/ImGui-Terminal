@@ -242,7 +242,7 @@ static Terminal g_term;
 							  defer:NO];
 		_window.titlebarAppearsTransparent = YES;
 		_window.titleVisibility = NSWindowTitleHidden;
-		_window.title = @"st-imgui (cocoa + metal)";
+		_window.title = @"ImguiTerminal";
 		_window.contentViewController = vc;
 		[_window center];
 		[_window makeKeyAndOrderFront:self];

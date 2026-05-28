@@ -319,7 +319,7 @@ if(APPLE)
     set_target_properties(p_osx PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST       "${CMAKE_SOURCE_DIR}/platform/OSX/Info.plist.in"
         MACOSX_BUNDLE_GUI_IDENTIFIER   "org.suckless.imgui-terminal"
-        MACOSX_BUNDLE_BUNDLE_NAME      "ImGui Terminal"
+        MACOSX_BUNDLE_BUNDLE_NAME      "ImguiTerminal"
         MACOSX_BUNDLE_BUNDLE_VERSION   "0.9.3"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "0.9.3"
 	MACOSX_BUNDLE_ICON_FILE "logo.icns"
