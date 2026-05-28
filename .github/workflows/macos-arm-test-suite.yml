@@ -93,7 +93,7 @@ jobs:
           APP="build/p_osx.app"
           DMG="ImguiTerminal.dmg"
           mkdir -p dist
-          cp -R "$APP" dist/
+          cp -R "$APP" "dist/ImguiTerminal.app"
           hdiutil create -volname ImguiTerminal -srcfolder dist -ov -format UDZO "$DMG"
 
       - name: Create release
