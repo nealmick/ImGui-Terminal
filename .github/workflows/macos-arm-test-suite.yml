@@ -92,6 +92,7 @@ jobs:
         run: |
           APP="build/p_osx.app"
           DMG="ImguiTerminal.dmg"
+          codesign --force --deep --sign - "$APP"
           mkdir -p dist
           cp -R "$APP" "dist/ImguiTerminal.app"
           hdiutil create -volname ImguiTerminal -srcfolder dist -ov -format UDZO "$DMG"
