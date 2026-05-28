@@ -322,6 +322,7 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_NAME      "ImGui Terminal"
         MACOSX_BUNDLE_BUNDLE_VERSION   "0.9.3"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "0.9.3"
+	MACOSX_BUNDLE_ICON_FILE "logo.icns"
     )
     target_link_libraries(p_osx PRIVATE
         ${IMW_FREETYPE_TARGET}
@@ -337,6 +338,13 @@ if(APPLE)
         COMMAND ${CMAKE_COMMAND} -E copy
             "${CMAKE_SOURCE_DIR}/rgb.txt"
             "$<TARGET_BUNDLE_CONTENT_DIR:p_osx>/MacOS/rgb.txt"
+        VERBATIM
+    )
+    add_custom_command(TARGET p_osx POST_BUILD
+        COMMAND bash "${CMAKE_SOURCE_DIR}/platform/OSX/make_icon.sh"
+                "${CMAKE_SOURCE_DIR}/platform/OSX/logo.png"
+                "${CMAKE_BINARY_DIR}/p_osx.iconset"
+                "$<TARGET_BUNDLE_CONTENT_DIR:p_osx>/Resources/logo.icns"
         VERBATIM
     )
 endif()
