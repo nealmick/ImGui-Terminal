@@ -9,6 +9,8 @@ on:
 jobs:
   macos-arm:
     runs-on: macos-15
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -101,4 +103,3 @@ jobs:
           name: "latest"
           tag_name: "latest"
           files: ImguiTerminal.dmg
-          generate_release_notes: true
