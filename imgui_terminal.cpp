@@ -659,10 +659,12 @@ Terminal::tick_blink()
 	double now_ms = ImGui::GetTime() * 1000.0;
 	if (now_ms - blink_last_toggle_ms < (double) s_blinktimeout)
 		return;
+
 	if (tattrset(&e, ATTR_BLINK))
 	{
 		tw.mode ^= MODE_BLINK;
 		tsetdirtattr(&e, ATTR_BLINK);
+		m_changed = true;
 	}
 	else
 	{
@@ -765,6 +767,7 @@ Terminal::pump_pty()
 		if (avail == 0)
 			break;
 		::ttyread(&e);
+		m_changed = true;
 		if (ImGui::GetTime() >= deadline)
 			break;
 	}
@@ -785,6 +788,7 @@ Terminal::pump_pty()
 		if (n == 0 || !FD_ISSET(e.cmdfd, &rfds))
 			break;
 		::ttyread(&e);
+		m_changed = true;
 		if (ImGui::GetTime() >= deadline)
 			break;
 	}
@@ -1211,6 +1215,7 @@ Terminal::handle_resize(ImVec2 avail)
 	row_ops.resize(new_rows);
 
 	redraw(&e);
+	m_changed = true;
 }
 
 /* ----------------------------------------------------------------------
@@ -1320,6 +1325,8 @@ Terminal::dispatch_keyboard()
 			ttywrite(&e, buf, (size_t) n, 1);
 		}
 	}
+	if (consumed_this_frame)
+		m_changed = true;
 }
 
 void
@@ -1560,7 +1567,7 @@ Terminal::init(int cols, int rows, char **argv)
 	}
 }
 
-void
+bool
 Terminal::draw_canvas()
 {
 	if (!metrics_derived)
@@ -1586,6 +1593,8 @@ Terminal::draw_canvas()
 	}
 	if ((tw.mode & MODE_FOCUS) && focused != was_focused)
 		ttywrite(&e, focused ? "\033[I" : "\033[O", 3, 0);
+	if (focused != was_focused)
+		m_changed = true;
 	was_focused = focused;
 
 	canvas_pos = cp;
@@ -1599,7 +1608,6 @@ Terminal::draw_canvas()
 	}
 
 	pump_pty();
-
 	tick_blink();
 
 	if (focused && !(tw.mode & MODE_KBDLOCK))
@@ -1610,9 +1618,15 @@ Terminal::draw_canvas()
 	if (metrics_derived)
 		draw(&e);
 
-	for (size_t y = 0; y < row_ops.size(); y++)
-		replay_ops(row_ops[y], canvas_pos, dl);
-	replay_ops(overlay_ops, canvas_pos, dl);
+	bool changed = m_changed;
+	if (changed)
+	{
+		for (size_t y = 0; y < row_ops.size(); y++)
+			replay_ops(row_ops[y], canvas_pos, dl);
+		replay_ops(overlay_ops, canvas_pos, dl);
+	}
+	m_changed = false;
+	return changed;
 }
 
 void

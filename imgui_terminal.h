@@ -110,7 +110,7 @@ public:
 	// User API
 	void init(int cols, int rows, char **argv);
 	void shutdown();
-	void draw_canvas();
+	bool draw_canvas();
 	void draw_widget(const char *id);
 	void dump_json(std::FILE *out);
 	void set_transparent(bool on);
@@ -158,6 +158,7 @@ private:
 	bool transparent_bg = false;
 	double blink_last_toggle_ms = 0.0;
 	bool metrics_derived = false;
+	bool m_changed = true; /* force first frame */
 
 	// Per-frame render context
 	ImVec2 canvas_pos{};
