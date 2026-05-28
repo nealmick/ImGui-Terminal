@@ -89,7 +89,9 @@ static Terminal g_term;
 
 - (void)windowWillClose:(NSNotification *)notification
 {
-	g_term.shutdown();
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+		g_term.shutdown();
+	});
 	ImGui_ImplMetal_Shutdown();
 	ImGui_ImplOSX_Shutdown();
 	ImGui::DestroyContext();
