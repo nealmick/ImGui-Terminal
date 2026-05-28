@@ -1,3 +1,5 @@
+<img width="150" height="150" alt="logo-2" src="https://github.com/user-attachments/assets/a07ad730-add1-480a-a2b1-7cf968bc4737" />
+
 # ImGui Terminal Emulator
 
 An ImGui-native terminal emulator based on [suckless st][st]. Replaces st's X11/Xft frontend (`x.c`) with an ImGui-based adapter that runs renderer agnostic — GLFW+OpenGL, Vulkan, Metal, or any other ImGui backend.
