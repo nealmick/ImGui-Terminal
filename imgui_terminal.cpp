@@ -812,12 +812,18 @@ Terminal::makeglyphfontspecs(ImwGlyphSpec *specs, const Glyph *glyphs, int len, 
 			continue;
 
 		Font *fnt = &s_dc.font;
-		if ((mode & ATTR_BOLD_FAINT) == ATTR_BOLD && (mode & ATTR_ITALIC))
-			fnt = &s_dc.ibfont;
-		else if ((mode & ATTR_BOLD_FAINT) == ATTR_BOLD)
-			fnt = &s_dc.bfont;
-		else if (mode & ATTR_ITALIC)
-			fnt = &s_dc.ifont;
+		/* Non-ASCII characters always use the base font — it has
+		   the merged CJK / emoji / symbol fallbacks.  Bold / italic
+		   variants are only meaningful for Latin text anyway. */
+		if (rune < 0x80)
+		{
+			if ((mode & ATTR_BOLD_FAINT) == ATTR_BOLD && (mode & ATTR_ITALIC))
+				fnt = &s_dc.ibfont;
+			else if ((mode & ATTR_BOLD_FAINT) == ATTR_BOLD)
+				fnt = &s_dc.bfont;
+			else if (mode & ATTR_ITALIC)
+				fnt = &s_dc.ifont;
+		}
 
 		int runewidth = tw.cw * ((mode & ATTR_WIDE) ? 2 : 1);
 
@@ -1030,54 +1036,80 @@ static void
 imw_load_fallback(const char *fc_query, double pxsize)
 {
 	FcPattern *pat = FcNameParse((const FcChar8 *) fc_query);
-	if (!pat)
-	{
-		fprintf(stderr, "imgui_terminal: fallback FcNameParse failed: %s\n", fc_query);
-		return;
-	}
+	if (!pat) return;
 	FcConfigSubstitute(NULL, pat, FcMatchPattern);
 	FcDefaultSubstitute(pat);
 
 	FcResult result;
 	FcPattern *match = FcFontMatch(NULL, pat, &result);
 	FcPatternDestroy(pat);
-	if (!match)
-	{
-		fprintf(stderr, "imgui_terminal: no fallback for '%s'\n", fc_query);
-		return;
-	}
+	if (!match) return;
 
 	FcChar8 *file = NULL;
 	if (FcPatternGetString(match, FC_FILE, 0, &file) != FcResultMatch || !file)
 	{
 		FcPatternDestroy(match);
-		fprintf(stderr, "imgui_terminal: fallback '%s' has no FC_FILE\n", fc_query);
 		return;
 	}
 
 	ImFontConfig cfg;
 	cfg.MergeMode = true;
 	cfg.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LoadColor | ImGuiFreeTypeLoaderFlags_Bitmap;
-
 #ifndef _WIN32
 	if (strstr(fc_query, "und-zsye") != NULL)
 		cfg.RasterizerDensity = 20.0f / (float) pxsize;
 #endif
-
-	ImFont *merged =
-	    ImGui::GetIO().Fonts->AddFontFromFileTTF((const char *) file, (float) pxsize, &cfg);
-	if (!merged)
-		fprintf(stderr, "imgui_terminal: fallback merge failed: %s (file=%s)\n", fc_query,
-		    (const char *) file);
-
+	ImGui::GetIO().Fonts->AddFontFromFileTTF((const char *) file, (float) pxsize, &cfg);
 	FcPatternDestroy(match);
 }
 
+static const ImWchar s_terminal_symbol_ranges[] = {
+    0x2190, 0x21FF, /* Arrows */
+    0x2500, 0x257F, /* Box Drawing */
+    0x2580, 0x259F, /* Block Elements */
+    0x25A0, 0x25FF, /* Geometric Shapes */
+    0x2600, 0x26FF, /* Misc Symbols */
+    0x2700, 0x27BF, /* Dingbats */
+    0x2800, 0x28FF, /* Braille Patterns */
+    0,
+};
+
 static void
-imw_load_variant_fallbacks(double pxsize)
+imw_load_terminal_symbols(double pxsize)
 {
-	imw_load_fallback(":lang=ja", pxsize);
-	imw_load_fallback(":lang=und-zsye", pxsize);
+	static const char *queries[] = {
+		":family=Apple Symbols",
+		":family=Symbol",
+		":charset=2800",  /* braille — narrowest query, matches best font */
+		":charset=2500",  /* box drawing */
+		NULL,
+	};
+
+	ImFontConfig cfg;
+	cfg.MergeMode = true;
+	cfg.GlyphRanges = s_terminal_symbol_ranges;
+
+	for (int i = 0; queries[i]; i++)
+	{
+		FcPattern *pat = FcNameParse((const FcChar8 *) queries[i]);
+		if (!pat) continue;
+		FcConfigSubstitute(NULL, pat, FcMatchPattern);
+		FcDefaultSubstitute(pat);
+
+		FcResult result;
+		FcPattern *match = FcFontMatch(NULL, pat, &result);
+		FcPatternDestroy(pat);
+		if (!match) continue;
+
+		FcChar8 *file = NULL;
+		bool ok = (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file);
+		if (ok)
+			ImGui::GetIO().Fonts->AddFontFromFileTTF(
+			    (const char *) file, (float) pxsize, &cfg);
+		FcPatternDestroy(match);
+		if (ok)
+			return;
+	}
 }
 
 void
@@ -1109,23 +1141,25 @@ Terminal::load_fonts_once()
 	double pxsize = 16.0;
 	FcPatternGetDouble(pattern, FC_PIXEL_SIZE, 0, &pxsize);
 
-	if (imw_load_one_font(&s_dc.font, pattern, pxsize))
-		imw_load_variant_fallbacks(pxsize);
+	/* Load the base font first — it gets the full glyph set. */
+	imw_load_one_font(&s_dc.font, pattern, pxsize);
+	imw_load_terminal_symbols(pxsize);
+	imw_load_fallback(":lang=ja", pxsize);
+	imw_load_fallback(":lang=und-zsye", pxsize);
 
+	/* Variant fonts only need ASCII/Latin — non-ASCII glyphs always
+	   render through the base font (see makeglyphfontspecs). */
 	FcPatternDel(pattern, FC_SLANT);
 	FcPatternAddInteger(pattern, FC_SLANT, FC_SLANT_ITALIC);
-	if (imw_load_one_font(&s_dc.ifont, pattern, pxsize))
-		imw_load_variant_fallbacks(pxsize);
+	imw_load_one_font(&s_dc.ifont, pattern, pxsize);
 
 	FcPatternDel(pattern, FC_WEIGHT);
 	FcPatternAddInteger(pattern, FC_WEIGHT, FC_WEIGHT_BOLD);
-	if (imw_load_one_font(&s_dc.ibfont, pattern, pxsize))
-		imw_load_variant_fallbacks(pxsize);
+	imw_load_one_font(&s_dc.ibfont, pattern, pxsize);
 
 	FcPatternDel(pattern, FC_SLANT);
 	FcPatternAddInteger(pattern, FC_SLANT, FC_SLANT_ROMAN);
-	if (imw_load_one_font(&s_dc.bfont, pattern, pxsize))
-		imw_load_variant_fallbacks(pxsize);
+	imw_load_one_font(&s_dc.bfont, pattern, pxsize);
 
 	FcPatternDestroy(pattern);
 	s_fonts_loaded = true;
