@@ -1,6 +1,7 @@
 name: macos-arm-test-suite
 
 on:
+  workflow_dispatch:     # manual "Run workflow" button (any branch)
   push:
     branches: [main]
   pull_request:
