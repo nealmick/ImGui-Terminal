@@ -84,7 +84,19 @@ cmake --build build --target p_osx                  # native macOS Cocoa+Metal
 
 
 ## The idea - ImGui plays the role of X11
-`imgui_terminal.cpp` deliberately uses ImGui APIs only — no GLFW, OpenGL, or Vulkan.
+The widget and emulator is implemented in the terminal class and deliberately uses ImGui APIs only — no GLFW, OpenGL, or
+Vulkan.
+
+```cpp
+#include "terminal.h"      // link terminal.cpp
+
+Terminal t;
+t.init(80, 24, nullptr);   // spawn the system shell
+// once per ImGui frame:
+t.draw_widget("###term");
+// on teardown:
+t.shutdown();
+```
 
 
 #### Demo
@@ -95,7 +107,7 @@ https://github.com/user-attachments/assets/b1fafe54-587e-40de-b826-1904cfdf93cd
 <img width="1796" height="1084" alt="Screenshot 2026-05-27 at 12 41 51 PM" src="https://github.com/user-attachments/assets/f95eef04-0344-4f53-bda0-9291c4e9222b" />
 
 ## License
-- This code (root, including `imgui_terminal.cpp`, `main.cpp`,
+- This code (root, including `terminal.h`, `terminal.cpp`,
   `CMakeLists.txt`, build config, etc.) — see `LICENSE` (BSL 1.1), me (at) nealmick (dot) com for licensing 
 - Upstream st (`st/`) — see `st/LICENSE` (MIT)
 - ImGui (`imgui/`) — see `imgui/LICENSE.txt` (MIT)

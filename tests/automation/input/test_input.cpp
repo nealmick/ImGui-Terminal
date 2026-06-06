@@ -63,7 +63,7 @@
 #include "imgui.h"
 #include "../test_setup.h"
 
-#include "imgui_terminal.h"
+#include "terminal.h"
 
 /*  Single Terminal owned at file scope so the per-frame loop and the
     atexit dump handler see the same instance. */

@@ -2,16 +2,7 @@
 #
 # Quick start (all platforms):
 #   cmake -B build -S .
-#   cmake --build build [--config Release]   # --config only matters for
-#                                            # multi-config generators
-#                                            # (MSVC, Xcode); ignored
-#                                            # by Make/Ninja
-#
-# Windows MSVC additionally needs vcpkg cloned in-repo before configure:
-#   git clone https://github.com/microsoft/vcpkg
-#   .\vcpkg\bootstrap-vcpkg.bat
-# CMake auto-detects ./vcpkg/ — no toolchain flag needed. See README.md
-# for per-platform package install commands.
+#   cmake --build build [--config Release]   
 #
 # Targets:
 #   imgui_terminal           — default GLFW + OpenGL host (always built)
@@ -23,15 +14,11 @@
 # All output lands at  <build_dir>/<target>  — multi-config
 # generators (MSBuild) are flattened so the test runners can rely on
 # build/test_core regardless of Debug/Release.
-
-# --- vcpkg auto-detection (must run BEFORE project()) ----------------
-# Resolution order:
-#   1. Caller already specified -DCMAKE_TOOLCHAIN_FILE=...   (respect it)
-#   2. ./vcpkg/ exists in the repo                          (preferred)
-#   3. VCPKG_ROOT env var is set                            (fallback)
-#   4. Nothing — POSIX users without vcpkg get pkg-config below
 #
 
+#--------------------------------------------------------------------
+# Toolchain — must be set before project()
+#--------------------------------------------------------------------
 if(WIN32 AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake")
         set(CMAKE_TOOLCHAIN_FILE
@@ -44,12 +31,15 @@ if(WIN32 AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     endif()
 endif()
 
+#--------------------------------------------------------------------
+# Project
+#--------------------------------------------------------------------
 cmake_minimum_required(VERSION 3.21)
 project(imgui_terminal LANGUAGES C CXX)
 
-# Apple targets compile .mm sources, which need Objective-C++. Enable
-# the language and configure ARC + deprecation suppression up-front so
-# any Apple target later in the file works regardless of order. 
+#--------------------------------------------------------------------
+# Apple — Objective-C++ for the .mm backend/host sources
+#--------------------------------------------------------------------
 if(APPLE)
     enable_language(OBJCXX)
     set_source_files_properties(
@@ -70,10 +60,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Single-config generators (Make, Ninja) default to no build type,
-# which means no optimization AND no debug symbols. Default to Release
-# unless the user passed -DCMAKE_BUILD_TYPE=... or is on a multi-config
-# generator (MSVC, Xcode — they pick at build time via --config).
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING
@@ -83,7 +69,6 @@ endif()
 #--------------------------------------------------------------------
 # Output directory — flatten multi-config to keep paths predictable
 #--------------------------------------------------------------------
-
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 foreach(cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${cfg} "${CMAKE_BINARY_DIR}")
@@ -92,14 +77,6 @@ endforeach()
 #--------------------------------------------------------------------
 # Dependencies
 #--------------------------------------------------------------------
-# MSVC uses vcpkg manifest mode (vcpkg.json next to this file) and
-# resolves via CONFIG mode find_package. Everything else — Linux,
-# macOS, AND MinGW (which ships MSYS2 pkg-config) — uses pkg-config.
-# We gate on MSVC, not WIN32, because WIN32 is true for both MSVC
-# and MinGW but they need different dep-resolution paths. Both
-# branches produce IMPORTED targets we link against uniformly via
-# the IMW_*_TARGET variables.
-
 set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/imgui")
 
 if(MSVC)
@@ -122,13 +99,8 @@ endif()
 #--------------------------------------------------------------------
 # Source-list constants — referenced by every target
 #--------------------------------------------------------------------
-# IMW_WIDGET     : the emulator + adapter (the actual product)
-# IMW_IMGUI_CORE : ImGui core sources, always linked
-# Backends and host shells are added per-target below.
-
 set(IMW_WIDGET
-    "${CMAKE_SOURCE_DIR}/emulator.c"
-    "${CMAKE_SOURCE_DIR}/imgui_terminal.cpp"
+    "${CMAKE_SOURCE_DIR}/terminal.cpp"
 )
 
 set(IMW_IMGUI_CORE
@@ -143,11 +115,6 @@ set(IMW_IMGUI_CORE
 #--------------------------------------------------------------------
 # Per-target setup helper
 #--------------------------------------------------------------------
-# Every target wants the same include search paths, IMGUI_USER_CONFIG
-# define, and platform-conditional warning/CRT flags. Centralise here
-# so individual add_executable() blocks stay focused on what's
-# different between targets.
-
 function(imw_configure_target target)
     target_include_directories(${target} PRIVATE
         "${CMAKE_SOURCE_DIR}"
@@ -159,14 +126,9 @@ function(imw_configure_target target)
         IMGUI_USER_CONFIG="imgui_user_config.h"
     )
     if(MSVC)
-        # Suckless-inherited C predates MSVC's secure-CRT push; we're
-        # not migrating to *_s variants. /utf-8 because our literals
-        # (test data, dump format) are UTF-8.
         target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
         target_compile_options(${target} PRIVATE /utf-8)
     else()
-        # Debug symbols are config-driven (CMake adds -g for Debug,
-        # nothing for Release). Don't hardcode it here.
         target_compile_options(${target} PRIVATE -Wall -Wformat)
     endif()
     if(UNIX)
@@ -180,11 +142,6 @@ function(imw_configure_target target)
     endif()
 endfunction()
 
-# Stage vcpkg's fontconfig data (fonts.conf + conf.d/) next to the
-# binary on MSVC builds. fontconfig is built by vcpkg with absolute
-# default paths pointing at vcpkg's install dir — the wrong location
-# once the binary moves. imgui_terminal.cpp's Terminal::load_fonts_once()
-# sets FONTCONFIG_PATH to <exe_dir>/fontconfig at runtime; 
 function(imw_msvc_stage_fontconfig target)
     if(MSVC AND DEFINED VCPKG_TARGET_TRIPLET)
         set(_fc_src
@@ -231,7 +188,6 @@ endif()
 #====================================================================
 # Test harnesses — headless, no GLFW, no GPU backend
 #====================================================================
-# Same emulator + widget as the production binaries
 if(NOT WIN32)
     foreach(harness IN ITEMS core input)
         set(t "test_${harness}")
@@ -331,9 +287,6 @@ if(APPLE)
         "-framework QuartzCore" "-framework GameController"
         "-framework IOKit"   "-framework CoreVideo"
     )
-    # rgb.txt resolution: imgui_terminal.cpp searches <exe_dir>/rgb.txt as one
-    # of its fallbacks. Drop a copy beside the binary inside the bundle
-    # so the GUI-launched app (CWD=/) finds it without widget changes.
     add_custom_command(TARGET p_osx POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
             "${CMAKE_SOURCE_DIR}/rgb.txt"

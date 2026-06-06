@@ -1,6 +1,7 @@
 name: macos-arm-test-suite
 
 on:
+  workflow_dispatch:     # manual "Run workflow" button (any branch)
   push:
     branches: [main]
   pull_request:
@@ -33,6 +34,10 @@ jobs:
       - name: Build all targets
         run: cmake --build build --parallel
 
+      - name: Prepare results dir
+        if: success() || failure()
+        run: mkdir -p results
+
       # Each test below is its own step so the Actions UI shows pass/fail
       # per test. `if: success() || failure()` lets every test run
       # regardless of whether earlier tests passed — useful when several
@@ -41,51 +46,88 @@ jobs:
       # --- core suite ---
       - name: core / attrs_basic
         if: success() || failure()
-        run: ./build/test_core --input tests/automation/core/attrs_basic/input.sh --output /tmp/actual.json && diff -q tests/automation/core/attrs_basic/expected.json /tmp/actual.json
+        run: |
+          ./build/test_core --input tests/automation/core/attrs_basic/input.sh --output results/core_attrs_basic.json
+          diff -u tests/automation/core/attrs_basic/expected.json results/core_attrs_basic.json
       - name: core / colors_ansi_16
         if: success() || failure()
-        run: ./build/test_core --input tests/automation/core/colors_ansi_16/input.sh --output /tmp/actual.json && diff -q tests/automation/core/colors_ansi_16/expected.json /tmp/actual.json
+        run: |
+          ./build/test_core --input tests/automation/core/colors_ansi_16/input.sh --output results/core_colors_ansi_16.json
+          diff -u tests/automation/core/colors_ansi_16/expected.json results/core_colors_ansi_16.json
       - name: core / colors_osc4
         if: success() || failure()
-        run: ./build/test_core --input tests/automation/core/colors_osc4/input.sh --output /tmp/actual.json && diff -q tests/automation/core/colors_osc4/expected.json /tmp/actual.json
+        run: |
+          ./build/test_core --input tests/automation/core/colors_osc4/input.sh --output results/core_colors_osc4.json
+          diff -u tests/automation/core/colors_osc4/expected.json results/core_colors_osc4.json
       - name: core / colors_truecolor
         if: success() || failure()
-        run: ./build/test_core --input tests/automation/core/colors_truecolor/input.sh --output /tmp/actual.json && diff -q tests/automation/core/colors_truecolor/expected.json /tmp/actual.json
+        run: |
+          ./build/test_core --input tests/automation/core/colors_truecolor/input.sh --output results/core_colors_truecolor.json
+          diff -u tests/automation/core/colors_truecolor/expected.json results/core_colors_truecolor.json
       - name: core / cursor_bar
         if: success() || failure()
-        run: ./build/test_core --input tests/automation/core/cursor_bar/input.sh --output /tmp/actual.json && diff -q tests/automation/core/cursor_bar/expected.json /tmp/actual.json
+        run: |
+          ./build/test_core --input tests/automation/core/cursor_bar/input.sh --output results/core_cursor_bar.json
+          diff -u tests/automation/core/cursor_bar/expected.json results/core_cursor_bar.json
       - name: core / cursor_block
         if: success() || failure()
-        run: ./build/test_core --input tests/automation/core/cursor_block/input.sh --output /tmp/actual.json && diff -q tests/automation/core/cursor_block/expected.json /tmp/actual.json
+        run: |
+          ./build/test_core --input tests/automation/core/cursor_block/input.sh --output results/core_cursor_block.json
+          diff -u tests/automation/core/cursor_block/expected.json results/core_cursor_block.json
       - name: core / cursor_underline
         if: success() || failure()
-        run: ./build/test_core --input tests/automation/core/cursor_underline/input.sh --output /tmp/actual.json && diff -q tests/automation/core/cursor_underline/expected.json /tmp/actual.json
+        run: |
+          ./build/test_core --input tests/automation/core/cursor_underline/input.sh --output results/core_cursor_underline.json
+          diff -u tests/automation/core/cursor_underline/expected.json results/core_cursor_underline.json
       - name: core / hello
         if: success() || failure()
-        run: ./build/test_core --input tests/automation/core/hello/input.sh --output /tmp/actual.json && diff -q tests/automation/core/hello/expected.json /tmp/actual.json
+        run: |
+          ./build/test_core --input tests/automation/core/hello/input.sh --output results/core_hello.json
+          diff -u tests/automation/core/hello/expected.json results/core_hello.json
       - name: core / wide_cjk
         if: success() || failure()
-        run: ./build/test_core --input tests/automation/core/wide_cjk/input.sh --output /tmp/actual.json && diff -q tests/automation/core/wide_cjk/expected.json /tmp/actual.json
+        run: |
+          ./build/test_core --input tests/automation/core/wide_cjk/input.sh --output results/core_wide_cjk.json
+          diff -u tests/automation/core/wide_cjk/expected.json results/core_wide_cjk.json
 
       # --- input suite ---
       - name: input / arrow_line_edit
         if: success() || failure()
-        run: ./build/test_input --events tests/automation/input/arrow_line_edit/events.txt --output /tmp/actual.json && diff -q tests/automation/input/arrow_line_edit/expected.json /tmp/actual.json
+        run: |
+          ./build/test_input --events tests/automation/input/arrow_line_edit/events.txt --output results/input_arrow_line_edit.json
+          diff -u tests/automation/input/arrow_line_edit/expected.json results/input_arrow_line_edit.json
       - name: input / backspace_edit
         if: success() || failure()
-        run: ./build/test_input --events tests/automation/input/backspace_edit/events.txt --output /tmp/actual.json && diff -q tests/automation/input/backspace_edit/expected.json /tmp/actual.json
+        run: |
+          ./build/test_input --events tests/automation/input/backspace_edit/events.txt --output results/input_backspace_edit.json
+          diff -u tests/automation/input/backspace_edit/expected.json results/input_backspace_edit.json
       - name: input / clipboard_paste
         if: success() || failure()
-        run: ./build/test_input --events tests/automation/input/clipboard_paste/events.txt --output /tmp/actual.json && diff -q tests/automation/input/clipboard_paste/expected.json /tmp/actual.json
+        run: |
+          ./build/test_input --events tests/automation/input/clipboard_paste/events.txt --output results/input_clipboard_paste.json
+          diff -u tests/automation/input/clipboard_paste/expected.json results/input_clipboard_paste.json
       - name: input / ctrl_c_interrupt
         if: success() || failure()
-        run: ./build/test_input --events tests/automation/input/ctrl_c_interrupt/events.txt --output /tmp/actual.json && diff -q tests/automation/input/ctrl_c_interrupt/expected.json /tmp/actual.json
+        run: |
+          ./build/test_input --events tests/automation/input/ctrl_c_interrupt/events.txt --output results/input_ctrl_c_interrupt.json
+          diff -u tests/automation/input/ctrl_c_interrupt/expected.json results/input_ctrl_c_interrupt.json
       - name: input / type_hello
         if: success() || failure()
-        run: ./build/test_input --events tests/automation/input/type_hello/events.txt --output /tmp/actual.json && diff -q tests/automation/input/type_hello/expected.json /tmp/actual.json
+        run: |
+          ./build/test_input --events tests/automation/input/type_hello/events.txt --output results/input_type_hello.json
+          diff -u tests/automation/input/type_hello/expected.json results/input_type_hello.json
       - name: input / utf8_typing
         if: success() || failure()
-        run: ./build/test_input --events tests/automation/input/utf8_typing/events.txt --output /tmp/actual.json && diff -q tests/automation/input/utf8_typing/expected.json /tmp/actual.json
+        run: |
+          ./build/test_input --events tests/automation/input/utf8_typing/events.txt --output results/input_utf8_typing.json
+          diff -u tests/automation/input/utf8_typing/expected.json results/input_utf8_typing.json
+
+      - name: Upload actual snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actual-snapshots
+          path: results/
 
       - name: Package app
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

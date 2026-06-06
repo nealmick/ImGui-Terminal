@@ -10,7 +10,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#include "imgui_terminal.h"
+#include "terminal.h"
 
 static VkAllocationCallbacks *g_alloc = nullptr;
 static VkInstance g_instance = VK_NULL_HANDLE;

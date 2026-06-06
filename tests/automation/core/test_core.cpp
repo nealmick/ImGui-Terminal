@@ -43,7 +43,7 @@
 #include "imgui.h"
 #include "../test_setup.h"
 
-#include "imgui_terminal.h"
+#include "terminal.h"
 
 /*
 	Terminal instance owned at file scope so the atexit handler can dump
@@ -112,7 +112,7 @@ main(int argc, char **argv)
 
 	g_term.init(80, 24, child_argv);
 
-	/*  Override emulator.c's SIGCHLD handler. See file header for why.  */
+	/*  Override the emulator's SIGCHLD handler. See file header for why.  */
 	signal(SIGCHLD, SIG_IGN);
 
 	/*  Drain until ttyread() returns 0 (EOF — child closed the PTY). */
