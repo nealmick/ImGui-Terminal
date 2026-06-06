@@ -53,6 +53,22 @@ find_bash(void)
 static inline void
 setup_test_env(void)
 {
+	/* Pin the widget to a repo-bundled font so cell metrics / variant routing
+	   are identical on every machine — system fonts (and the CI runner image)
+	   drift, which would break the snapshot baselines. Computed before chdir,
+	   while cwd is still the repo root. An explicit TERMINAL_FONT wins. */
+	if (!getenv("TERMINAL_FONT"))
+	{
+		char cwd[PATH_MAX];
+		if (getcwd(cwd, sizeof cwd))
+		{
+			static char fontpath[PATH_MAX];
+			snprintf(fontpath, sizeof fontpath,
+			    "%s/imgui/misc/fonts/Cousine-Regular.ttf", cwd);
+			setenv("TERMINAL_FONT", fontpath, 1);
+		}
+	}
+
 	static char homedir[] = "/tmp/imgui_test.XXXXXX";
 	if (!mkdtemp(homedir))
 	{

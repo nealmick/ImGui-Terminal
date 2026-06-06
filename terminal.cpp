@@ -4341,6 +4341,29 @@ Terminal::load_fonts_once()
 {
 	if (s_fonts_loaded)
 		return;
+
+	/* Deterministic font for the test harness. When TERMINAL_FONT points at a
+	   .ttf we load it directly (bypassing fontconfig) into all four slots, so
+	   cell metrics and variant routing are identical on every machine — the
+	   snapshot tests can't depend on whatever fonts the host happens to have.
+	   The product path below uses normal system font discovery. */
+	if (const char *test_font = getenv("TERMINAL_FONT"); test_font && *test_font)
+	{
+		ImGui::GetIO().Fonts->SetFontLoader(ImGuiFreeType::GetFontLoader());
+		Font *slots[4] = {&s_dc.font, &s_dc.ifont, &s_dc.ibfont, &s_dc.bfont};
+		for (Font *f : slots)
+		{
+			memset(f, 0, sizeof *f);
+			f->pxsize = 16.0f;
+			ImFontConfig cfg;
+			f->match =
+			    ImGui::GetIO().Fonts->AddFontFromFileTTF(test_font, 16.0f, &cfg);
+			if (!f->match)
+				die("imgui_terminal: cannot load TERMINAL_FONT: %s\n", test_font);
+		}
+		s_fonts_loaded = true;
+		return;
+	}
 #ifdef _WIN32
 	{
 		char exe_dir[1024];
