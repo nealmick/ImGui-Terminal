@@ -27,7 +27,7 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
 
-#include "imgui_terminal.h"
+#include "terminal.h"
 
 int
 main(int, char **)

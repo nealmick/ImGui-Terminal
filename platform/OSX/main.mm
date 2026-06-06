@@ -11,7 +11,7 @@
 #include "imgui_impl_osx.h"
 #include "imgui_impl_metal.h"
 
-#include "imgui_terminal.h"
+#include "terminal.h"
 
 static Terminal g_term;
 
