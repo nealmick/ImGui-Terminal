@@ -483,6 +483,9 @@ private:
 	bool was_focused = false;
 	bool transparent_bg = false;
 	double blink_last_toggle_ms = 0.0;
+	double cursor_blink_timer = 0.0;
+	bool cursor_blink_on = true;
+	bool cursor_blinking = false;
 	bool metrics_derived = false;
 	bool m_changed = true; /* force first frame */
 	bool m_retained = false;
@@ -552,6 +555,7 @@ private:
 	static constexpr int s_borderpx = 2;
 	static constexpr unsigned int s_cursorthickness = 2;
 	static constexpr unsigned int s_blinktimeout = 800;
+	static constexpr unsigned int s_cursorblinktimeout = 750;
 	static constexpr unsigned int s_defaultrcs = 257;
 	static constexpr unsigned int s_defaultattr = 11;
 	static constexpr int s_ignoremod = 0;
