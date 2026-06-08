@@ -605,7 +605,7 @@ private:
 	    {ImGuiKey_NumLock | Terminal::TERMMOD, Terminal::s_numlock, {0}},
 	};
 	static constexpr int s_selmasks[3] = {0, 0, ImGuiMod_Alt};
-	static constexpr Key s_key[32] = {
+	static constexpr Key s_key[] = {
 	    {ImGuiKey_Tab, ImGuiMod_Shift, "\033[Z", 0, 0},
 	    {ImGuiKey_Tab, Terminal::IMW_MOD_ANY, "\t", 0, 0},
 	    {ImGuiKey_Backspace, Terminal::IMW_MOD_ANY, "\177", 0, 0},
