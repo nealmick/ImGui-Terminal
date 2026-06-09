@@ -343,7 +343,7 @@ public:
 	void init(int cols, int rows, char **argv);
 	void shutdown();
 	bool draw_canvas();
-	void draw_widget(const char *id);
+	bool draw_widget(const char *id);
 	void set_retained(bool on);
 	void dump_json(std::FILE *out);
 	void set_transparent(bool on);

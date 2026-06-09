@@ -59,6 +59,9 @@ main(int, char **)
 
 		term_b.draw_widget("###term_b");
 
+		if (!term_a.is_alive() && !term_b.is_alive())
+			glfwSetWindowShouldClose(window, GLFW_TRUE);
+
 		ImGui::Render();
 		int w, h;
 		glfwGetFramebufferSize(window, &w, &h);

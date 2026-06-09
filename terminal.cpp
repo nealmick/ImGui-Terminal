@@ -1192,7 +1192,7 @@ Terminal::ttyread()
 	return (size_t) dwRead;
 }
 #else
-size_t
+	size_t
 Terminal::ttyread()
 {
 	int ret, written;
@@ -1210,6 +1210,12 @@ Terminal::ttyread()
 			{
 				waitpid(pid, NULL, WNOHANG);
 				pid = 0;
+			}
+			handle_child_exit("shell exited\n");
+			if (cmdfd >= 0)
+			{
+				close(cmdfd);
+				cmdfd = -1;
 			}
 			return 0;
 		case -1:
@@ -3991,6 +3997,8 @@ Terminal::pump_pty()
 		if (avail == 0)
 			break;
 		ttyread();
+		if (!alive)
+			break;
 		m_changed = true;
 		if (ImGui::GetTime() >= deadline)
 			break;
@@ -4012,6 +4020,8 @@ Terminal::pump_pty()
 		if (n == 0 || !FD_ISSET(cmdfd, &rfds))
 			break;
 		ttyread();
+		if (!alive)
+			break;
 		m_changed = true;
 		if (ImGui::GetTime() >= deadline)
 			break;
@@ -4859,6 +4869,9 @@ Terminal::init(int cols, int rows, char **argv)
 bool
 Terminal::draw_canvas()
 {
+	if (!alive)
+		return false;
+
 	if (!metrics_derived)
 		finalize_metrics();
 
@@ -4918,9 +4931,12 @@ Terminal::draw_canvas()
 	return changed;
 }
 
-void
+bool
 Terminal::draw_widget(const char *id)
 {
+	if (!alive)
+		return false;
+
 	// Title with persistent ID.
 	char label[300];
 	snprintf(label, sizeof label, "%s%s", title, id ? id : "###term_widget");
@@ -4930,6 +4946,7 @@ Terminal::draw_widget(const char *id)
 	if (ImGui::Begin(label))
 		draw_canvas();
 	ImGui::End();
+	return true;
 }
 
 void
