@@ -4861,7 +4861,7 @@ Terminal::init(int cols, int rows, char **argv)
 	tw.w = tw.tw;
 	tw.h = tw.th;
 	tw.mode = MODE_VISIBLE | MODE_FOCUSED | MODE_NUMLOCK;
-	tw.cursor = 1;
+	tw.cursor = 2;
 	cursor_blinking = false;
 	cursor_blink_timer = ImGui::GetTime() * 1000.0;
 
