@@ -22,6 +22,7 @@
 
 #include "imgui_freetype.h"
 #include <fontconfig/fontconfig.h>
+#include "imgui_internal.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -4941,7 +4942,14 @@ Terminal::draw_canvas()
 	tick_blink();
 
 	if (focused && !(tw.mode & MODE_KBDLOCK))
+	{
+		ImGuiContext& g = *GImGui;
+		g.PlatformImeData.WantVisible = true;
+		g.PlatformImeData.WantTextInput = true;
+		g.PlatformImeData.InputPos = ImVec2(canvas_pos.x + term.c.x * tw.cw, canvas_pos.y + term.c.y * tw.ch - g.FontSize / 2);
+		g.PlatformImeData.InputLineHeight = g.FontSize;
 		dispatch_keyboard();
+	}
 
 	dispatch_mouse();
 

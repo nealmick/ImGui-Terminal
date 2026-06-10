@@ -186,6 +186,48 @@ else()  # Linux / BSD
 endif()
 
 #====================================================================
+# SDL3 + OpenGL host
+#====================================================================
+find_package(SDL3 CONFIG QUIET)
+if(SDL3_FOUND)
+    set(IMW_SDL3_TARGET SDL3::SDL3)
+elseif(NOT MSVC)
+    pkg_check_modules(SDL3 QUIET IMPORTED_TARGET sdl3)
+    if(SDL3_FOUND)
+        set(IMW_SDL3_TARGET PkgConfig::SDL3)
+    endif()
+endif()
+
+if(SDL3_FOUND)
+    add_executable(imgui_terminal_sdl3
+        ${IMW_WIDGET}
+        ${IMW_IMGUI_CORE}
+        "${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp"
+        "${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
+        "${CMAKE_SOURCE_DIR}/examples/main_example_sdl3_gl.cpp"
+    )
+    imw_configure_target(imgui_terminal_sdl3)
+    imw_msvc_stage_fontconfig(imgui_terminal_sdl3)
+    target_link_libraries(imgui_terminal_sdl3 PRIVATE
+        ${IMW_SDL3_TARGET}
+        ${IMW_FREETYPE_TARGET}
+        ${IMW_FONTCONFIG_TARGET}
+    )
+    if(WIN32)
+        target_link_libraries(imgui_terminal_sdl3 PRIVATE opengl32 gdi32 imm32)
+    elseif(APPLE)
+        target_link_libraries(imgui_terminal_sdl3 PRIVATE
+            "-framework OpenGL" "-framework Cocoa"
+            "-framework IOKit"  "-framework CoreVideo"
+        )
+    else()  # Linux / BSD
+        target_link_libraries(imgui_terminal_sdl3 PRIVATE GL util)
+    endif()
+else()
+    message(STATUS "SDL3 not found — skipping imgui_terminal_sdl3 target")
+endif()
+
+#====================================================================
 # Test harnesses — headless, no GLFW, no GPU backend
 #====================================================================
 if(NOT WIN32)
