@@ -4862,7 +4862,7 @@ Terminal::init(int cols, int rows, char **argv)
 	tw.h = tw.th;
 	tw.mode = MODE_VISIBLE | MODE_FOCUSED | MODE_NUMLOCK;
 	tw.cursor = 1;
-	cursor_blinking = true;
+	cursor_blinking = false;
 	cursor_blink_timer = ImGui::GetTime() * 1000.0;
 
 	load_fonts_once();
