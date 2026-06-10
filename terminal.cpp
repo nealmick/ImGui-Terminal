@@ -1238,6 +1238,14 @@ Terminal::ttywrite(const char *s, size_t n, int may_echo)
 {
 	const char *next;
 
+	/* User input resets the cursor blink timer so the cursor appears
+	   immediately, matching how every cursor-blink UI works. */
+	if (may_echo && cursor_blinking)
+	{
+		cursor_blink_on = true;
+		cursor_blink_timer = ImGui::GetTime() * 1000.0;
+	}
+
 	if (may_echo && IS_SET(MODE_ECHO))
 		twrite(s, n, 1);
 
@@ -2001,7 +2009,9 @@ Terminal::tsetmode(int priv, int set, const int *args, int narg)
 				case 18: /* DECPFF -- Printer feed (IGNORED) */
 				case 19: /* DECPEX -- Printer extent (IGNORED) */
 				case 42: /* DECNRCM -- National characters (IGNORED) */
-				case 12: /* att610 -- Start blinking cursor (IGNORED) */
+				case 12: /* att610 -- Cursor blink enable/disable */
+					cursor_blinking = set;
+					cursor_blink_on = true;
 					break;
 				case 25: /* DECTCEM -- Text Cursor Enable Mode */
 					set_win_mode(!set, MODE_HIDE);
@@ -3437,6 +3447,8 @@ Terminal::draw_cursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 
 	if (tw.mode & MODE_HIDE)
 		return;
+	if ((tw.mode & MODE_FOCUSED) && cursor_blinking && !cursor_blink_on)
+		return;
 
 	g.mode &= ATTR_BOLD | ATTR_ITALIC | ATTR_UNDERLINE | ATTR_STRUCK | ATTR_WIDE;
 
@@ -3598,6 +3610,9 @@ Terminal::set_cursor_style(int cursor)
 	if (!between(cursor, 0, 7))
 		return 1;
 	tw.cursor = cursor;
+	/* DECSCUSR: 0/1/3/5 = blinking, 2/4/6/7 = steady */
+	cursor_blinking = (cursor <= 1 || cursor == 3 || cursor == 5);
+	cursor_blink_on = true;
 	return 0;
 }
 
@@ -3887,20 +3902,31 @@ void
 Terminal::tick_blink()
 {
 	double now_ms = ImGui::GetTime() * 1000.0;
-	if (now_ms - blink_last_toggle_ms < (double) s_blinktimeout)
-		return;
 
-	if (tattrset(ATTR_BLINK))
+	/* Text blink (ATTR_BLINK) */
+	if (now_ms - blink_last_toggle_ms >= (double) s_blinktimeout)
 	{
-		tw.mode ^= MODE_BLINK;
-		tsetdirtattr(ATTR_BLINK);
+		if (tattrset(ATTR_BLINK))
+		{
+			tw.mode ^= MODE_BLINK;
+			tsetdirtattr(ATTR_BLINK);
+			m_changed = true;
+		}
+		else
+		{
+			tw.mode |= MODE_BLINK;
+		}
+		blink_last_toggle_ms = now_ms;
+	}
+
+	/* Cursor blink */
+	if (cursor_blinking &&
+	    now_ms - cursor_blink_timer >= (double) s_cursorblinktimeout)
+	{
+		cursor_blink_on = !cursor_blink_on;
+		cursor_blink_timer = now_ms;
 		m_changed = true;
 	}
-	else
-	{
-		tw.mode |= MODE_BLINK;
-	}
-	blink_last_toggle_ms = now_ms;
 }
 
 bool
@@ -4836,6 +4862,8 @@ Terminal::init(int cols, int rows, char **argv)
 	tw.h = tw.th;
 	tw.mode = MODE_VISIBLE | MODE_FOCUSED | MODE_NUMLOCK;
 	tw.cursor = 2;
+	cursor_blinking = false;
+	cursor_blink_timer = ImGui::GetTime() * 1000.0;
 
 	load_fonts_once();
 	alive = 1;
@@ -5072,10 +5100,18 @@ Terminal::dump_oplist(FILE *out, const std::vector<DrawOp> &ops)
 void
 Terminal::dump_json(FILE *out)
 {
+	/*  Force cursor visible during dump so tests get deterministic
+	    snapshots regardless of blink phase. */
+	bool saved_blinking = cursor_blinking;
+	cursor_blinking = false;
+	cursor_blink_on = true;
+
 	/*  Force a full redraw so the per-row cache reflects the
 	    post-processing state of Term, not whatever was cached partway
 	    through. Tests rely on this. */
 	redraw();
+
+	cursor_blinking = saved_blinking;
 
 	fprintf(out, "{\n");
 	fprintf(out, "  \"cw\": %d,\n", tw.cw);
@@ -5125,6 +5161,11 @@ Terminal::s_clippaste(Terminal *t, const Arg *)
 	const char *txt = ImGui::GetClipboardText();
 	if (!txt || !*txt)
 		return;
+	if (t->cursor_blinking)
+	{
+		t->cursor_blink_on = true;
+		t->cursor_blink_timer = ImGui::GetTime() * 1000.0;
+	}
 	size_t n = strlen(txt);
 	if (t->tw.mode & MODE_BRCKTPASTE)
 		t->ttywrite("\033[200~", 6, 0);
