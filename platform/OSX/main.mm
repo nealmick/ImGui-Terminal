@@ -19,6 +19,18 @@ static Terminal g_term;
 @interface AppViewController : NSViewController <MTKViewDelegate, NSWindowDelegate>
 @property(nonatomic, strong) id<MTLDevice> device;
 @property(nonatomic, strong) id<MTLCommandQueue> commandQueue;
+@property(nonatomic, strong) dispatch_source_t ptyTimer;
+@end
+
+@interface AppViewController ()
+@property(nonatomic) BOOL showDebug;
+@property(nonatomic) double lastStatsTime;
+@property(nonatomic) int frameCount;
+@property(nonatomic) double frameAccumMs;
+@property(nonatomic) double lastRedrawTime;
+@property(nonatomic) double frameDisplayFps;
+@property(nonatomic) double frameDisplayMs;
+@property(nonatomic) double drawDisplayHz;
 @end
 
 @implementation AppViewController
@@ -81,6 +93,16 @@ static Terminal g_term;
 	g_term.init(80, 24, NULL);
 	g_term.set_retained(true);
 	g_term.set_transparent(true);
+
+	/* High-frequency PTY pump (~1000 Hz) — processes terminal data
+	   between display frames so the next draw always sees up-to-date
+	   terminal state instead of spreading work over multiple frames. */
+	dispatch_source_t timer = dispatch_source_create(
+	    DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+	dispatch_source_set_timer(timer, DISPATCH_TIME_NOW, NSEC_PER_MSEC, 0);
+	dispatch_source_set_event_handler(timer, ^{ g_term.tick(); });
+	dispatch_resume(timer);
+	self.ptyTimer = timer;
 }
 
 - (void)viewWillAppear
@@ -91,6 +113,11 @@ static Terminal g_term;
 
 - (void)windowWillClose:(NSNotification *)notification
 {
+	if (self.ptyTimer)
+	{
+		dispatch_source_cancel(self.ptyTimer);
+		self.ptyTimer = nil;
+	}
 	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
 		g_term.shutdown();
 	});
@@ -110,6 +137,8 @@ static Terminal g_term;
 {
 	@autoreleasepool
 	{
+		double frame_start = ImGui::GetTime();
+
 		ImGuiIO &io = ImGui::GetIO();
 		io.DisplaySize.x = view.bounds.size.width;
 		io.DisplaySize.y = view.bounds.size.height;
@@ -155,6 +184,51 @@ static Terminal g_term;
 		}
 		ImGui::End();
 		ImGui::PopStyleVar(3);
+
+		/* Update timing stats (compute rates every 0.5 s) */
+		{
+			static int prev_dc = 0;
+			double now = ImGui::GetTime();
+			double dt = now - self.lastStatsTime;
+			if (dt >= 0.5)
+			{
+				int dc = g_term.draw_count();
+				self.frameDisplayFps = (double)self.frameCount / dt;
+				self.frameDisplayMs = self.frameAccumMs / MAX(self.frameCount, 1);
+				self.drawDisplayHz = (double)(dc - prev_dc) / dt;
+				prev_dc = dc;
+				self.frameCount = 0;
+				self.frameAccumMs = 0.0;
+				self.lastStatsTime = now;
+			}
+			self.frameCount++;
+			self.frameAccumMs += (now - frame_start) * 1000.0;
+			if (drew)
+				self.lastRedrawTime = now;
+		}
+
+		/* Debug overlay (bottom-right) */
+		if (self.showDebug)
+		{
+			ImVec2 pos(vp->WorkPos.x + vp->WorkSize.x - 10,
+			    vp->WorkPos.y + vp->WorkSize.y - 10);
+			ImGui::SetNextWindowPos(pos, ImGuiCond_Always, ImVec2(1.0f, 1.0f));
+			ImGui::SetNextWindowBgAlpha(0.3f);
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+			if (ImGui::Begin("##debug", NULL,
+			    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+			    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+			    ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize))
+			{
+				double idle = ImGui::GetTime() - self.lastRedrawTime;
+				ImGui::Text("Display %5.0f FPS  %6.2f ms",
+				    self.frameDisplayFps, self.frameDisplayMs);
+				ImGui::Text("Draw    %5.1f Hz  idle %4.1f s",
+				    self.drawDisplayHz, idle);
+			}
+			ImGui::End();
+			ImGui::PopStyleVar();
+		}
 
 		ImGui::Render();
 
@@ -221,6 +295,12 @@ static Terminal g_term;
 					   keyEquivalent:@"-"];
 	smaller.target = self;
 
+	[viewMenu addItem:[NSMenuItem separatorItem]];
+	NSMenuItem *debug = [viewMenu addItemWithTitle:@"Show Debug Info"
+					       action:@selector(toggleDebug:)
+					keyEquivalent:@"d"];
+	debug.target = self;
+
 	viewItem.submenu = viewMenu;
 
 	NSApp.mainMenu = mainMenu;
@@ -269,6 +349,12 @@ static Terminal g_term;
 	g_term.set_font_size(g_term.get_font_size() - 2.0f);
 }
 
+- (void)toggleDebug:(NSMenuItem *)sender
+{
+	AppViewController *vc = (AppViewController *)self.window.contentViewController;
+	vc.showDebug = !vc.showDebug;
+}
+
 /*
 	NSMenuDelegate — fires right before the menu is sized and shown.
 	Flip the title to reflect the action that clicking will perform
@@ -276,12 +362,18 @@ static Terminal g_term;
 */
 - (void)menuNeedsUpdate:(NSMenu *)menu
 {
+	AppViewController *vc = (AppViewController *)self.window.contentViewController;
 	for (NSMenuItem *item in menu.itemArray)
 	{
 		if (item.action == @selector(toggleTransparent:))
 		{
 			item.title = g_term.is_transparent() ? @"Disable Transparency"
 							     : @"Enable Transparency";
+		}
+		else if (item.action == @selector(toggleDebug:))
+		{
+			item.title = vc.showDebug ? @"Hide Debug Info"
+						  : @"Show Debug Info";
 		}
 	}
 }

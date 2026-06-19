@@ -3281,6 +3281,7 @@ Terminal::drawregion(int x1, int y1, int x2, int y2)
 void
 Terminal::draw()
 {
+	m_draw_count++;
 	int cx = term.c.x;
 
 	if (!begin_draw())
@@ -4012,8 +4013,6 @@ Terminal::pump_pty()
 	if (cmdfd < 0)
 		return;
 
-	const double drain_budget_s = 0.005;
-	const double deadline = ImGui::GetTime() + drain_budget_s;
 #ifdef _WIN32
 	for (;;)
 	{
@@ -4026,8 +4025,6 @@ Terminal::pump_pty()
 		if (!alive)
 			break;
 		m_changed = true;
-		if (ImGui::GetTime() >= deadline)
-			break;
 	}
 #else
 	fd_set rfds;
@@ -4049,10 +4046,15 @@ Terminal::pump_pty()
 		if (!alive)
 			break;
 		m_changed = true;
-		if (ImGui::GetTime() >= deadline)
-			break;
 	}
 #endif
+}
+
+void
+Terminal::tick()
+{
+	pump_pty();
+	tick_blink();
 }
 
 int
@@ -4945,7 +4947,7 @@ Terminal::draw_canvas()
 
 	dispatch_mouse();
 
-	if (metrics_derived)
+	if (metrics_derived && (m_changed || !m_retained))
 		draw();
 
 	bool changed = m_changed;

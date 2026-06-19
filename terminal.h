@@ -349,7 +349,9 @@ public:
 	void set_transparent(bool on);
 	bool is_transparent() const;
 	bool is_alive() const;
+	void tick();
 
+	int draw_count() const { return m_draw_count; }
 	void set_font_size(float px);
 	float get_font_size();
 	size_t ttyread(); /* tests use this to drain the PTY */
@@ -489,6 +491,7 @@ private:
 	bool metrics_derived = false;
 	bool m_changed = true; /* force first frame */
 	bool m_retained = false;
+	int m_draw_count = 0;
 
 	// Per-frame render context
 	ImVec2 canvas_pos{};
