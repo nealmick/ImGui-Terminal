@@ -23,14 +23,6 @@ static Terminal g_term;
 @end
 
 @interface AppViewController ()
-@property(nonatomic) BOOL showDebug;
-@property(nonatomic) double lastStatsTime;
-@property(nonatomic) int frameCount;
-@property(nonatomic) double frameAccumMs;
-@property(nonatomic) double lastRedrawTime;
-@property(nonatomic) double frameDisplayFps;
-@property(nonatomic) double frameDisplayMs;
-@property(nonatomic) double drawDisplayHz;
 @end
 
 @implementation AppViewController
@@ -137,8 +129,6 @@ static Terminal g_term;
 {
 	@autoreleasepool
 	{
-		double frame_start = ImGui::GetTime();
-
 		ImGuiIO &io = ImGui::GetIO();
 		io.DisplaySize.x = view.bounds.size.width;
 		io.DisplaySize.y = view.bounds.size.height;
@@ -184,51 +174,6 @@ static Terminal g_term;
 		}
 		ImGui::End();
 		ImGui::PopStyleVar(3);
-
-		/* Update timing stats (compute rates every 0.5 s) */
-		{
-			static int prev_dc = 0;
-			double now = ImGui::GetTime();
-			double dt = now - self.lastStatsTime;
-			if (dt >= 0.5)
-			{
-				int dc = g_term.draw_count();
-				self.frameDisplayFps = (double)self.frameCount / dt;
-				self.frameDisplayMs = self.frameAccumMs / MAX(self.frameCount, 1);
-				self.drawDisplayHz = (double)(dc - prev_dc) / dt;
-				prev_dc = dc;
-				self.frameCount = 0;
-				self.frameAccumMs = 0.0;
-				self.lastStatsTime = now;
-			}
-			self.frameCount++;
-			self.frameAccumMs += (now - frame_start) * 1000.0;
-			if (drew)
-				self.lastRedrawTime = now;
-		}
-
-		/* Debug overlay (bottom-right) */
-		if (self.showDebug)
-		{
-			ImVec2 pos(vp->WorkPos.x + vp->WorkSize.x - 10,
-			    vp->WorkPos.y + vp->WorkSize.y - 10);
-			ImGui::SetNextWindowPos(pos, ImGuiCond_Always, ImVec2(1.0f, 1.0f));
-			ImGui::SetNextWindowBgAlpha(0.3f);
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-			if (ImGui::Begin("##debug", NULL,
-			    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-			    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-			    ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize))
-			{
-				double idle = ImGui::GetTime() - self.lastRedrawTime;
-				ImGui::Text("Display %5.0f FPS  %6.2f ms",
-				    self.frameDisplayFps, self.frameDisplayMs);
-				ImGui::Text("Draw    %5.1f Hz  idle %4.1f s",
-				    self.drawDisplayHz, idle);
-			}
-			ImGui::End();
-			ImGui::PopStyleVar();
-		}
 
 		ImGui::Render();
 
@@ -295,12 +240,6 @@ static Terminal g_term;
 					   keyEquivalent:@"-"];
 	smaller.target = self;
 
-	[viewMenu addItem:[NSMenuItem separatorItem]];
-	NSMenuItem *debug = [viewMenu addItemWithTitle:@"Show Debug Info"
-					       action:@selector(toggleDebug:)
-					keyEquivalent:@"d"];
-	debug.target = self;
-
 	viewItem.submenu = viewMenu;
 
 	NSApp.mainMenu = mainMenu;
@@ -349,12 +288,6 @@ static Terminal g_term;
 	g_term.set_font_size(g_term.get_font_size() - 2.0f);
 }
 
-- (void)toggleDebug:(NSMenuItem *)sender
-{
-	AppViewController *vc = (AppViewController *)self.window.contentViewController;
-	vc.showDebug = !vc.showDebug;
-}
-
 /*
 	NSMenuDelegate — fires right before the menu is sized and shown.
 	Flip the title to reflect the action that clicking will perform
@@ -362,18 +295,12 @@ static Terminal g_term;
 */
 - (void)menuNeedsUpdate:(NSMenu *)menu
 {
-	AppViewController *vc = (AppViewController *)self.window.contentViewController;
 	for (NSMenuItem *item in menu.itemArray)
 	{
 		if (item.action == @selector(toggleTransparent:))
 		{
 			item.title = g_term.is_transparent() ? @"Disable Transparency"
 							     : @"Enable Transparency";
-		}
-		else if (item.action == @selector(toggleDebug:))
-		{
-			item.title = vc.showDebug ? @"Hide Debug Info"
-						  : @"Show Debug Info";
 		}
 	}
 }

@@ -4585,10 +4585,21 @@ Terminal::dispatch_keyboard()
 			if (ImGui::IsKeyPressed((ImGuiKey) k, /*  repeat  */ true))
 			{
 				char byte = (char) (k - ImGuiKey_A + 1);
+				if (byte == 0x04)
+					break;
 				ttywrite(&byte, 1, 1);
 				consumed_this_frame = true;
 				break;
 			}
+		}
+	}
+	if (!consumed_this_frame && io.KeyCtrl && io.KeyShift && !io.KeyAlt && !io.KeySuper)
+	{
+		if (ImGui::IsKeyPressed(ImGuiKey_D, /*  repeat  */ true))
+		{
+			char byte = 0x04;
+			ttywrite(&byte, 1, 1);
+			consumed_this_frame = true;
 		}
 	}
 
