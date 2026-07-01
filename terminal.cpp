@@ -3107,7 +3107,7 @@ check_control_code:
 		gp->mode |= ATTR_WIDE;
 		if (term.c.x + 1 < term.col)
 		{
-			if (gp[1].mode == ATTR_WIDE && term.c.x + 2 < term.col)
+			if ((gp[1].mode & ATTR_WIDE) && term.c.x + 2 < term.col)
 			{
 				gp[2].u = ' ';
 				gp[2].mode &= ~ATTR_WDUMMY;
@@ -4266,6 +4266,9 @@ imw_load_one_font(Font *f, FcPattern *src_pattern, double pxsize)
 		return 0;
 	}
 
+	int face_index = 0;
+	FcPatternGetInteger(match, FC_INDEX, 0, &face_index);
+
 	int wantv, gotv;
 	if (FcPatternGetInteger(p, FC_SLANT, 0, &wantv) == FcResultMatch &&
 	    FcPatternGetInteger(match, FC_SLANT, 0, &gotv) == FcResultMatch && wantv != gotv)
@@ -4279,6 +4282,7 @@ imw_load_one_font(Font *f, FcPattern *src_pattern, double pxsize)
 	}
 
 	ImFontConfig cfg;
+	cfg.FontNo = face_index;
 	cfg.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LoadColor;
 	f->match =
 	    ImGui::GetIO().Fonts->AddFontFromFileTTF((const char *) file, (float) pxsize, &cfg);
@@ -4314,14 +4318,19 @@ imw_load_fallback(const char *fc_query, double pxsize)
 		return;
 	}
 
+	int face_index = 0;
+	FcPatternGetInteger(match, FC_INDEX, 0, &face_index);
+
 	ImFontConfig cfg;
 	cfg.MergeMode = true;
+	cfg.FontNo = face_index;
 	cfg.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LoadColor | ImGuiFreeTypeLoaderFlags_Bitmap;
 #ifndef _WIN32
 	if (strstr(fc_query, "und-zsye") != NULL)
 		cfg.RasterizerDensity = 20.0f / (float) pxsize;
 #endif
 	ImGui::GetIO().Fonts->AddFontFromFileTTF((const char *) file, (float) pxsize, &cfg);
+
 	FcPatternDestroy(match);
 }
 
@@ -4364,10 +4373,15 @@ imw_load_terminal_symbols(double pxsize)
 		if (!match) continue;
 
 		FcChar8 *file = NULL;
+		int face_index = 0;
 		bool ok = (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file);
 		if (ok)
+		{
+			FcPatternGetInteger(match, FC_INDEX, 0, &face_index);
+			cfg.FontNo = face_index;
 			ImGui::GetIO().Fonts->AddFontFromFileTTF(
 			    (const char *) file, (float) pxsize, &cfg);
+		}
 		FcPatternDestroy(match);
 		if (ok)
 			return;
@@ -4585,21 +4599,10 @@ Terminal::dispatch_keyboard()
 			if (ImGui::IsKeyPressed((ImGuiKey) k, /*  repeat  */ true))
 			{
 				char byte = (char) (k - ImGuiKey_A + 1);
-				if (byte == 0x04)
-					break;
 				ttywrite(&byte, 1, 1);
 				consumed_this_frame = true;
 				break;
 			}
-		}
-	}
-	if (!consumed_this_frame && io.KeyCtrl && io.KeyShift && !io.KeyAlt && !io.KeySuper)
-	{
-		if (ImGui::IsKeyPressed(ImGuiKey_D, /*  repeat  */ true))
-		{
-			char byte = 0x04;
-			ttywrite(&byte, 1, 1);
-			consumed_this_frame = true;
 		}
 	}
 
