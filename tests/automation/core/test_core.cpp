@@ -34,7 +34,6 @@
 
 #include <errno.h>
 #include <limits.h>
-#include <locale.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,7 +99,6 @@ main(int argc, char **argv)
 	    fresh tempdir before term_init forks bash. Same setup as
 	    test_input — keeps baselines stable across machines.  */
 	setup_test_env();
-	setlocale(LC_CTYPE, "");
 
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
