@@ -338,7 +338,7 @@ static Terminal g_term;
 						  defer:NO];
 		[self.settingsWindow setTitle:@"Settings"];
 		[self.settingsWindow center];
-
+		self.settingsWindow.releasedWhenClosed = NO;
 		NSView *content = self.settingsWindow.contentView;
 
 		/* Window background color picker */
