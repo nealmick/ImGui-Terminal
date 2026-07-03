@@ -72,16 +72,21 @@ main(int argc, char **argv)
 {
 	const char *input_path = NULL;
 	const char *output_path = NULL;
+	float font_size = 0.0f;
 	for (int i = 1; i < argc; i++)
 	{
 		if (!strcmp(argv[i], "--input") && i + 1 < argc)
 			input_path = argv[++i];
 		else if (!strcmp(argv[i], "--output") && i + 1 < argc)
 			output_path = argv[++i];
+		else if (!strcmp(argv[i], "--font-size") && i + 1 < argc)
+			font_size = strtof(argv[++i], NULL);
 	}
 	if (!input_path || !output_path)
 	{
-		fprintf(stderr, "usage: %s --input <script.sh> --output <state.json>\n", argv[0]);
+		fprintf(stderr,
+		    "usage: %s --input <script.sh> --output <state.json> [--font-size px]\n",
+		    argv[0]);
 		return 1;
 	}
 
@@ -109,6 +114,8 @@ main(int argc, char **argv)
 	char *child_argv[] = {bash_path, nop, norc, (char *) input_path, NULL};
 
 	g_term.init(80, 24, child_argv);
+	if (font_size > 0.0f)
+		g_term.set_font_size(font_size);
 
 	/*  Override the emulator's SIGCHLD handler. See file header for why.  */
 	signal(SIGCHLD, SIG_IGN);

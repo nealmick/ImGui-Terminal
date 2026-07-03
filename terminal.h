@@ -502,6 +502,7 @@ private:
 	ImwGlyphSpec specs_buf[1024];
 
 	// ---------- private helpers ----------
+	void load_fonts(float px_override);
 	void load_fonts_once();
 	void load_rgb_db();
 	bool parse_color(const char *name, uint8_t *r, uint8_t *g, uint8_t *b);

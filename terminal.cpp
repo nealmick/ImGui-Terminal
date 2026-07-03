@@ -4488,11 +4488,8 @@ imw_load_terminal_symbols(double pxsize)
 }
 
 void
-Terminal::load_fonts_once()
+Terminal::load_fonts(float px_override)
 {
-	if (s_fonts_loaded)
-		return;
-
 	/* Deterministic font for the test harness. When TERMINAL_FONT points at a
 	   .ttf we load it directly (bypassing fontconfig) into all four slots, so
 	   cell metrics and variant routing are identical on every machine — the
@@ -4505,10 +4502,10 @@ Terminal::load_fonts_once()
 		for (Font *f : slots)
 		{
 			memset(f, 0, sizeof *f);
-			f->pxsize = 16.0f;
+			f->pxsize = px_override > 0.0f ? px_override : 16.0f;
 			ImFontConfig cfg;
 			f->match =
-			    ImGui::GetIO().Fonts->AddFontFromFileTTF(test_font, 16.0f, &cfg);
+			    ImGui::GetIO().Fonts->AddFontFromFileTTF(test_font, f->pxsize, &cfg);
 			if (!f->match)
 				die("imgui_terminal: cannot load TERMINAL_FONT: %s\n", test_font);
 		}
@@ -4537,7 +4534,16 @@ Terminal::load_fonts_once()
 		die("imgui_terminal: failed to parse font pattern: %s\n", font);
 
 	double pxsize = 16.0;
-	FcPatternGetDouble(pattern, FC_PIXEL_SIZE, 0, &pxsize);
+	if (px_override > 0.0f)
+	{
+		pxsize = px_override;
+		FcPatternDel(pattern, FC_PIXEL_SIZE);
+		FcPatternAddDouble(pattern, FC_PIXEL_SIZE, pxsize);
+	}
+	else
+	{
+		FcPatternGetDouble(pattern, FC_PIXEL_SIZE, 0, &pxsize);
+	}
 
 	/* Load the base font first — it gets the full glyph set. */
 	imw_load_one_font(&s_dc.font, pattern, pxsize);
@@ -4561,6 +4567,13 @@ Terminal::load_fonts_once()
 
 	FcPatternDestroy(pattern);
 	s_fonts_loaded = true;
+}
+
+void
+Terminal::load_fonts_once()
+{
+	if (!s_fonts_loaded)
+		load_fonts(0.0f);
 }
 
 static void
@@ -4612,14 +4625,23 @@ Terminal::set_font_size(float px)
 		px = 6.0f;
 	if (px > 72.0f)
 		px = 72.0f;
-	s_dc.font.pxsize = px;
-	s_dc.bfont.pxsize = px;
-	s_dc.ifont.pxsize = px;
-	s_dc.ibfont.pxsize = px;
+	if (fabsf(px - s_dc.font.pxsize) < 0.01f)
+		return;
+
+	/* The color-emoji fallback uses a fixed bitmap strike and derives its
+	   RasterizerDensity from the requested font size. Rebuild the merged font
+	   sources so zooming does not reuse the density calculated for 16 px. */
+	ImGui::GetIO().Fonts->Clear();
+	s_fonts_loaded = false;
+	metrics_derived = false;
+	load_fonts(px);
 	finalize_metrics();
 
+	row_ops.clear();
+	overlay_ops.clear();
 	tw.tw = 0;
 	tw.th = 0;
+	m_changed = true;
 }
 
 void
