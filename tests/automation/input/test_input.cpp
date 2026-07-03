@@ -51,7 +51,6 @@
 
 #include <errno.h>
 #include <limits.h>
-#include <locale.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -557,7 +556,6 @@ main(int argc, char **argv)
 	/*  Env + cwd pin — must happen before term_init so the forked
 	    bash child inherits them.  */
 	setup_test_env();
-	setlocale(LC_CTYPE, "");
 
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();

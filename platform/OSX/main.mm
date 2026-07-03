@@ -19,6 +19,14 @@ static Terminal g_term;
 @interface AppViewController : NSViewController <MTKViewDelegate, NSWindowDelegate>
 @property(nonatomic, strong) id<MTLDevice> device;
 @property(nonatomic, strong) id<MTLCommandQueue> commandQueue;
+@property(nonatomic, strong) dispatch_source_t ptyTimer;
+@end
+
+@interface AppViewController ()
+@property(nonatomic, strong) MTKView *mtkView;
+@property(nonatomic, strong) NSView *tintView;
+- (void)setWindowTintColor:(NSColor *)color;
+- (NSColor *)windowTintColor;
 @end
 
 @implementation AppViewController
@@ -53,8 +61,24 @@ static Terminal g_term;
 
 - (void)loadView
 {
-	MTKView *view = [[MTKView alloc] initWithFrame:CGRectMake(0, 0, 1200, 800) device:_device];
-	view.clearColor = MTLClearColorMake(0.05, 0.05, 0.05, 1.0);
+	NSVisualEffectView *blurView =
+	    [[NSVisualEffectView alloc] initWithFrame:CGRectMake(0, 0, 1200, 800)];
+	blurView.material = NSVisualEffectMaterialHUDWindow;
+	blurView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+	blurView.state = NSVisualEffectStateActive;
+	blurView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+
+	MTKView *view = [[MTKView alloc] initWithFrame:blurView.bounds device:_device];
+	view.clearColor = MTLClearColorMake(0, 0, 0, 0);
+	view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+	view.layer.opaque = NO;
+
+	self.tintView = [[NSView alloc] initWithFrame:blurView.bounds];
+	self.tintView.wantsLayer = YES;
+	self.tintView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+	self.tintView.layer.backgroundColor =
+	    [NSColor colorWithSRGBRed:0.06 green:0.06 blue:0.10 alpha:0.35].CGColor;
+
 	const char *home = getenv("HOME");
 	if (home)
 	{
@@ -67,20 +91,47 @@ static Terminal g_term;
 	    current_path ? current_path : "/usr/bin:/bin"];
 	setenv("PATH", [new_path UTF8String], 1);
 
-	self.view = view;
+	self.mtkView = view;
+	[blurView addSubview:self.tintView];
+	[blurView addSubview:view];
+	self.view = blurView;
 }
 
 - (void)viewDidLoad
 {
 	[super viewDidLoad];
 
-	MTKView *mtkView = (MTKView *) self.view;
+	MTKView *mtkView = (MTKView *) self.mtkView;
 	mtkView.delegate = self;
 	
-	ImGui_ImplOSX_Init(self.view);
+	ImGui_ImplOSX_Init(mtkView);
 	g_term.init(80, 24, NULL);
 	g_term.set_retained(true);
 	g_term.set_transparent(true);
+
+	/* High-frequency PTY pump (~1000 Hz) — processes terminal data
+	   between display frames so the next draw always sees up-to-date
+	   terminal state instead of spreading work over multiple frames. */
+	dispatch_source_t timer = dispatch_source_create(
+	    DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+	dispatch_source_set_timer(timer, DISPATCH_TIME_NOW, NSEC_PER_MSEC, 0);
+	dispatch_source_set_event_handler(timer, ^{ g_term.tick(); });
+	dispatch_resume(timer);
+	self.ptyTimer = timer;
+}
+
+- (void)setWindowTintColor:(NSColor *)color
+{
+	NSColor *srgb = [color colorUsingColorSpace:NSColorSpace.sRGBColorSpace] ?: color;
+	self.tintView.layer.backgroundColor = srgb.CGColor;
+}
+
+- (NSColor *)windowTintColor
+{
+	CGColorRef cg = self.tintView.layer.backgroundColor;
+	if (!cg)
+		return [NSColor clearColor];
+	return [NSColor colorWithCGColor:cg];
 }
 
 - (void)viewWillAppear
@@ -91,6 +142,11 @@ static Terminal g_term;
 
 - (void)windowWillClose:(NSNotification *)notification
 {
+	if (self.ptyTimer)
+	{
+		dispatch_source_cancel(self.ptyTimer);
+		self.ptyTimer = nil;
+	}
 	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
 		g_term.shutdown();
 	});
@@ -178,6 +234,14 @@ static Terminal g_term;
 @property(nonatomic, strong) NSWindow *window;
 @end
 
+@interface AppDelegate ()
+@property(nonatomic, strong) NSWindow *settingsWindow;
+@property(nonatomic, strong) NSColorWell *colorWell;
+@property(nonatomic, strong) NSButton *transparencyCheckbox;
+@property(nonatomic, strong) NSSlider *fontSizeSlider;
+@property(nonatomic, strong) NSTextField *fontSizeValueLabel;
+@end
+
 @implementation AppDelegate
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender
@@ -193,6 +257,10 @@ static Terminal g_term;
 	NSMenuItem *appItem = [[NSMenuItem alloc] init];
 	[mainMenu addItem:appItem];
 	NSMenu *appMenu = [[NSMenu alloc] init];
+	NSMenuItem *settingsItem =
+	    [appMenu addItemWithTitle:@"Settings…" action:@selector(showSettings:) keyEquivalent:@","];
+	settingsItem.target = self;
+	[appMenu addItem:[NSMenuItem separatorItem]];
 	[appMenu addItemWithTitle:@"Quit" action:@selector(terminate:) keyEquivalent:@"q"];
 	appItem.submenu = appMenu;
 
@@ -242,31 +310,206 @@ static Terminal g_term;
 							  defer:NO];
 		_window.titlebarAppearsTransparent = YES;
 		_window.titleVisibility = NSWindowTitleHidden;
+		_window.opaque = NO;
+		_window.backgroundColor = [NSColor clearColor];
+		_window.hasShadow = YES;
 		_window.title = @"ImguiTerminal";
 		_window.contentViewController = vc;
 		[_window center];
 		[_window makeKeyAndOrderFront:self];
 
 		[self installMainMenu];
+		[self loadSettings];
 	}
 	return self;
 }
 
 /* Menu actions -------------------------------------------------------- */
 
+- (void)showSettings:(id)sender
+{
+	if (!self.settingsWindow)
+	{
+		NSUInteger settingsStyle = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable;
+		self.settingsWindow =
+		    [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 360, 190)
+					      styleMask:settingsStyle
+						backing:NSBackingStoreBuffered
+						  defer:NO];
+		[self.settingsWindow setTitle:@"Settings"];
+		[self.settingsWindow center];
+		self.settingsWindow.releasedWhenClosed = NO;
+		NSView *content = self.settingsWindow.contentView;
+
+		/* Window background color picker */
+		NSTextField *colorLabel = [NSTextField labelWithString:@"Window Background:"];
+		colorLabel.frame = NSMakeRect(20, 145, 150, 20);
+		[content addSubview:colorLabel];
+
+		self.colorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(190, 138, 140, 30)];
+		self.colorWell.target = self;
+		self.colorWell.action = @selector(colorChanged:);
+		[content addSubview:self.colorWell];
+
+		/* Buffer transparency toggle */
+		self.transparencyCheckbox =
+		    [[NSButton alloc] initWithFrame:NSMakeRect(20, 105, 200, 22)];
+		[self.transparencyCheckbox setButtonType:NSButtonTypeSwitch];
+		[self.transparencyCheckbox setTitle:@"Buffer Transparency"];
+		[self.transparencyCheckbox setTarget:self];
+		[self.transparencyCheckbox setAction:@selector(toggleBufferTransparency:)];
+		[content addSubview:self.transparencyCheckbox];
+
+		/* Font size slider */
+		NSTextField *fontSizeLabel = [NSTextField labelWithString:@"Font Size:"];
+		fontSizeLabel.frame = NSMakeRect(20, 65, 70, 20);
+		[content addSubview:fontSizeLabel];
+
+		self.fontSizeSlider = [[NSSlider alloc] initWithFrame:NSMakeRect(95, 65, 180, 20)];
+		self.fontSizeSlider.minValue = 8.0;
+		self.fontSizeSlider.maxValue = 40.0;
+		self.fontSizeSlider.continuous = YES;
+		self.fontSizeSlider.target = self;
+		self.fontSizeSlider.action = @selector(fontSizeChanged:);
+		[content addSubview:self.fontSizeSlider];
+
+		self.fontSizeValueLabel = [NSTextField labelWithString:@"14"];
+		self.fontSizeValueLabel.frame = NSMakeRect(285, 65, 55, 20);
+		self.fontSizeValueLabel.alignment = NSTextAlignmentRight;
+		[content addSubview:self.fontSizeValueLabel];
+	}
+	[self refreshSettingsControls];
+	[self.settingsWindow makeKeyAndOrderFront:self];
+	[NSApp activateIgnoringOtherApps:YES];
+}
+
+- (void)refreshSettingsControls
+{
+	AppViewController *vc = (AppViewController *) self.window.contentViewController;
+	[self.colorWell setColor:[vc windowTintColor]];
+	[self.transparencyCheckbox setState:g_term.is_transparent()
+					 ? NSControlStateValueOn
+					 : NSControlStateValueOff];
+	float currentSize = g_term.get_font_size();
+	[self.fontSizeSlider setFloatValue:currentSize];
+	[self.fontSizeValueLabel setStringValue:[NSString stringWithFormat:@"%.0f", currentSize]];
+}
+
+- (NSString *)settingsFilePath
+{
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSURL *appSupport =
+	    [fm URLForDirectory:NSApplicationSupportDirectory
+		     inDomain:NSUserDomainMask
+	    appropriateForURL:nil
+		       create:YES
+			error:nil];
+	NSURL *appDir = [appSupport URLByAppendingPathComponent:@"com.imgui-terminal"
+						   isDirectory:YES];
+	[fm createDirectoryAtURL:appDir
+	    withIntermediateDirectories:YES
+			     attributes:nil
+				  error:nil];
+	return [[appDir URLByAppendingPathComponent:@"settings.json"] path];
+}
+
+- (void)saveSettings
+{
+	AppViewController *vc = (AppViewController *) self.window.contentViewController;
+	NSColor *color = [vc windowTintColor];
+	CGFloat r, g, b, a;
+	NSColor *srgb = [color colorUsingColorSpace:NSColorSpace.sRGBColorSpace] ?: color;
+	[srgb getRed:&r green:&g blue:&b alpha:&a];
+
+	NSDictionary *dict = @{
+	    @"tint_color" : @{@"r" : @(r), @"g" : @(g), @"b" : @(b), @"a" : @(a)},
+	    @"buffer_transparency" : @(g_term.is_transparent()),
+	    @"font_size" : @(g_term.get_font_size()),
+	};
+
+	NSString *path = [self settingsFilePath];
+	NSError *error = nil;
+	NSData *data = [NSJSONSerialization dataWithJSONObject:dict
+						       options:NSJSONWritingPrettyPrinted
+							 error:&error];
+	if (data)
+		[data writeToFile:path atomically:YES];
+}
+
+- (void)loadSettings
+{
+	NSString *path = [self settingsFilePath];
+	NSData *data = [NSData dataWithContentsOfFile:path];
+	if (!data)
+		return;
+
+	NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data
+							     options:0
+							       error:nil];
+	if (![dict isKindOfClass:[NSDictionary class]])
+		return;
+
+	/* Load tint color */
+	NSDictionary *tint = dict[@"tint_color"];
+	if ([tint isKindOfClass:[NSDictionary class]])
+	{
+		CGFloat r = [tint[@"r"] doubleValue];
+		CGFloat g = [tint[@"g"] doubleValue];
+		CGFloat b = [tint[@"b"] doubleValue];
+		CGFloat a = [tint[@"a"] doubleValue];
+		NSColor *color = [NSColor colorWithSRGBRed:r green:g blue:b alpha:a];
+		AppViewController *vc = (AppViewController *) self.window.contentViewController;
+		[vc setWindowTintColor:color];
+	}
+
+	/* Load buffer transparency */
+	NSNumber *transparent = dict[@"buffer_transparency"];
+	if (transparent)
+		g_term.set_transparent([transparent boolValue]);
+
+	/* Load font size */
+	NSNumber *fontSize = dict[@"font_size"];
+	if (fontSize)
+		g_term.set_font_size([fontSize floatValue]);
+}
+
+- (void)colorChanged:(NSColorWell *)sender
+{
+	AppViewController *vc = (AppViewController *) self.window.contentViewController;
+	[vc setWindowTintColor:[sender color]];
+	[self saveSettings];
+}
+
+- (void)toggleBufferTransparency:(NSButton *)sender
+{
+	g_term.set_transparent([sender state] == NSControlStateValueOn);
+	[self saveSettings];
+}
+
+- (void)fontSizeChanged:(NSSlider *)sender
+{
+	float size = [sender floatValue];
+	g_term.set_font_size(size);
+	[self.fontSizeValueLabel setStringValue:[NSString stringWithFormat:@"%.0f", size]];
+	[self saveSettings];
+}
+
 - (void)toggleTransparent:(NSMenuItem *)sender
 {
 	g_term.set_transparent(!g_term.is_transparent());
+	[self saveSettings];
 }
 
 - (void)increaseFontSize:(NSMenuItem *)sender
 {
 	g_term.set_font_size(g_term.get_font_size() + 2.0f);
+	[self saveSettings];
 }
 
 - (void)decreaseFontSize:(NSMenuItem *)sender
 {
 	g_term.set_font_size(g_term.get_font_size() - 2.0f);
+	[self saveSettings];
 }
 
 /*

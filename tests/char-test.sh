@@ -65,6 +65,7 @@ hr "Emoji — color rendering (ImGuiFreeTypeLoaderFlags_LoadColor)"
 printf "Faces:    😀 😎 🤔 😴 🥳 🤖\n"
 printf "Symbols:  🔴 🟢 🔵 ⭐ 🎉 ✨\n"
 printf "Tools:    🔧 🔨 💻 📦 🐛 🚀\n"
+printf "Width:    |A☕B| |A🖐️B| — B must start two cells after each emoji\n"
 note "color emoji should render in color (not as replacement glyphs)"
 note "via fontconfig fallback merge — Apple Color Emoji on macOS, Noto on Linux"
 

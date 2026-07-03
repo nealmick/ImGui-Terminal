@@ -27,6 +27,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <locale.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -79,6 +80,67 @@
 #define IS_SET(flag) ((term.mode & (flag)) != 0)
 
 #define UTF_INVALID 0xFFFD
+
+struct ImwUnicodeRange
+{
+	Rune first;
+	Rune last;
+};
+
+/* Unicode 17.0 Emoji_Presentation property.  libc wcwidth tables trail the
+   Unicode standard on several platforms, so default emoji need an explicit,
+   deterministic two-cell width. */
+static bool
+imw_is_emoji_presentation(Rune u)
+{
+	static const ImwUnicodeRange ranges[] = {
+		{0x231A, 0x231B}, {0x23E9, 0x23EC}, {0x23F0, 0x23F0},
+		{0x23F3, 0x23F3}, {0x25FD, 0x25FE}, {0x2614, 0x2615},
+		{0x2648, 0x2653}, {0x267F, 0x267F}, {0x2693, 0x2693},
+		{0x26A1, 0x26A1}, {0x26AA, 0x26AB}, {0x26BD, 0x26BE},
+		{0x26C4, 0x26C5}, {0x26CE, 0x26CE}, {0x26D4, 0x26D4},
+		{0x26EA, 0x26EA}, {0x26F2, 0x26F3}, {0x26F5, 0x26F5},
+		{0x26FA, 0x26FA}, {0x26FD, 0x26FD}, {0x2705, 0x2705},
+		{0x270A, 0x270B}, {0x2728, 0x2728}, {0x274C, 0x274C},
+		{0x274E, 0x274E}, {0x2753, 0x2755}, {0x2757, 0x2757},
+		{0x2795, 0x2797}, {0x27B0, 0x27B0}, {0x27BF, 0x27BF},
+		{0x2B1B, 0x2B1C}, {0x2B50, 0x2B50}, {0x2B55, 0x2B55},
+		{0x1F004, 0x1F004}, {0x1F0CF, 0x1F0CF}, {0x1F18E, 0x1F18E},
+		{0x1F191, 0x1F19A}, {0x1F1E6, 0x1F1FF}, {0x1F201, 0x1F201},
+		{0x1F21A, 0x1F21A}, {0x1F22F, 0x1F22F}, {0x1F232, 0x1F236},
+		{0x1F238, 0x1F23A}, {0x1F250, 0x1F251}, {0x1F300, 0x1F320},
+		{0x1F32D, 0x1F335}, {0x1F337, 0x1F37C}, {0x1F37E, 0x1F393},
+		{0x1F3A0, 0x1F3CA}, {0x1F3CF, 0x1F3D3}, {0x1F3E0, 0x1F3F0},
+		{0x1F3F4, 0x1F3F4}, {0x1F3F8, 0x1F43E}, {0x1F440, 0x1F440},
+		{0x1F442, 0x1F4FC}, {0x1F4FF, 0x1F53D}, {0x1F54B, 0x1F54E},
+		{0x1F550, 0x1F567}, {0x1F57A, 0x1F57A}, {0x1F595, 0x1F596},
+		{0x1F5A4, 0x1F5A4}, {0x1F5FB, 0x1F64F}, {0x1F680, 0x1F6C5},
+		{0x1F6CC, 0x1F6CC}, {0x1F6D0, 0x1F6D2}, {0x1F6D5, 0x1F6D8},
+		{0x1F6DC, 0x1F6DF}, {0x1F6EB, 0x1F6EC}, {0x1F6F4, 0x1F6FC},
+		{0x1F7E0, 0x1F7EB}, {0x1F7F0, 0x1F7F0}, {0x1F90C, 0x1F93A},
+		{0x1F93C, 0x1F945}, {0x1F947, 0x1F9FF}, {0x1FA70, 0x1FA7C},
+		{0x1FA80, 0x1FA8A}, {0x1FA8E, 0x1FAC6}, {0x1FAC8, 0x1FAC8},
+		{0x1FACD, 0x1FADC}, {0x1FADF, 0x1FAEA}, {0x1FAEF, 0x1FAF8},
+	};
+
+	for (const ImwUnicodeRange &range : ranges)
+	{
+		if (u < range.first)
+			return false;
+		if (u <= range.last)
+			return true;
+	}
+	return false;
+}
+
+static bool
+imw_is_emoji_glyph(Rune u)
+{
+	/* Emoji_Presentation covers BMP emoji such as U+2615.  The supplementary
+	   emoji blocks also include text-default glyphs promoted by VS16, such as
+	   U+1F590 U+FE0F. */
+	return imw_is_emoji_presentation(u) || between(u, 0x1F000, 0x1FAFF);
+}
 
 #ifdef _WIN32
 static int
@@ -2972,8 +3034,12 @@ Terminal::tputc(Rune u)
 	else
 	{
 		len = utf8encode(u, c);
-		if (!control && (width = wcwidth(u)) == -1)
-			width = 1;
+		if (!control)
+		{
+			width = imw_is_emoji_presentation(u) ? 2 : wcwidth(u);
+			if (width == -1)
+				width = 1;
+		}
 	}
 
 	if (IS_SET(MODE_PRINT))
@@ -3076,6 +3142,35 @@ check_control_code:
 	if (selected(term.c.x, term.c.y))
 		selclear();
 
+	/* VS15/VS16 modify the preceding glyph; they must never replace the cell
+	   under the cursor.  VS16 also turns text-default emoji (for example
+	   U+1F590 U+FE0F) into a square, two-cell terminal glyph. */
+	if (u == 0xFE0E || u == 0xFE0F)
+	{
+		if (u == 0xFE0F)
+		{
+			int x = (term.c.state & CURSOR_WRAPNEXT) ? term.c.x : term.c.x - 1;
+			if (x >= 0 && (term.line[term.c.y][x].mode & ATTR_WDUMMY))
+				x--;
+			if (x >= 0 && !(term.line[term.c.y][x].mode & ATTR_WIDE) &&
+			    x + 1 < term.col)
+			{
+				term.line[term.c.y][x].mode |= ATTR_WIDE;
+				term.line[term.c.y][x + 1].u = '\0';
+				term.line[term.c.y][x + 1].mode = ATTR_WDUMMY;
+				term.dirty[term.c.y] = 1;
+				if (!(term.c.state & CURSOR_WRAPNEXT))
+				{
+					if (x + 2 < term.col)
+						tmoveto(x + 2, term.c.y);
+					else
+						term.c.state |= CURSOR_WRAPNEXT;
+				}
+			}
+		}
+		return;
+	}
+
 	gp = &term.line[term.c.y][term.c.x];
 	if (IS_SET(MODE_WRAP) && (term.c.state & CURSOR_WRAPNEXT))
 	{
@@ -3107,7 +3202,7 @@ check_control_code:
 		gp->mode |= ATTR_WIDE;
 		if (term.c.x + 1 < term.col)
 		{
-			if (gp[1].mode == ATTR_WIDE && term.c.x + 2 < term.col)
+			if ((gp[1].mode & ATTR_WIDE) && term.c.x + 2 < term.col)
 			{
 				gp[2].u = ' ';
 				gp[2].mode &= ~ATTR_WDUMMY;
@@ -3281,6 +3376,7 @@ Terminal::drawregion(int x1, int y1, int x2, int y2)
 void
 Terminal::draw()
 {
+	m_draw_count++;
 	int cx = term.c.x;
 
 	if (!begin_draw())
@@ -4012,8 +4108,6 @@ Terminal::pump_pty()
 	if (cmdfd < 0)
 		return;
 
-	const double drain_budget_s = 0.005;
-	const double deadline = ImGui::GetTime() + drain_budget_s;
 #ifdef _WIN32
 	for (;;)
 	{
@@ -4026,8 +4120,6 @@ Terminal::pump_pty()
 		if (!alive)
 			break;
 		m_changed = true;
-		if (ImGui::GetTime() >= deadline)
-			break;
 	}
 #else
 	fd_set rfds;
@@ -4049,10 +4141,15 @@ Terminal::pump_pty()
 		if (!alive)
 			break;
 		m_changed = true;
-		if (ImGui::GetTime() >= deadline)
-			break;
 	}
 #endif
+}
+
+void
+Terminal::tick()
+{
+	pump_pty();
+	tick_blink();
 }
 
 int
@@ -4184,8 +4281,7 @@ Terminal::drawglyphfontspecs(const ImwGlyphSpec *specs, Glyph base, int len, int
 		char buf[8];
 		int n = (int) utf8encode(s->codepoint, buf);
 		ImVec2 gp((float) s->x, (float) s->y);
-#ifdef _WIN32
-		if ((base.mode & ATTR_WIDE) && s->codepoint > 0xFFFF)
+		if ((base.mode & ATTR_WIDE) && imw_is_emoji_glyph(s->codepoint))
 		{
 			ImFontBaked *baked = s->font->GetFontBaked(s_dc.font.pxsize);
 			if (baked)
@@ -4194,16 +4290,21 @@ Terminal::drawglyphfontspecs(const ImwGlyphSpec *specs, Glyph base, int len, int
 				if (gl)
 				{
 					float sc = s_dc.font.pxsize / baked->Size;
-					float gw = (gl->X1 - gl->X0) * sc;
 					float gh = (gl->Y1 - gl->Y0) * sc;
-					float cw2 = (float) (tw.cw * 2);
 					float ch1 = (float) tw.ch;
-					gp.x += (cw2 - gw) * 0.5f - gl->X0 * sc;
 					gp.y += (ch1 - gh) * 0.5f - gl->Y0 * sc;
+#ifdef _WIN32
+					/* Supplementary-plane color glyphs also need horizontal
+					   centering with the Windows FreeType backend. */
+					if (s->codepoint > 0xFFFF)
+					{
+						float gw = (gl->X1 - gl->X0) * sc;
+						gp.x += ((float) (tw.cw * 2) - gw) * 0.5f - gl->X0 * sc;
+					}
+#endif
 				}
 			}
 		}
-#endif
 		emit_text(s->font, gp, fg, buf, n);
 	}
 
@@ -4264,6 +4365,9 @@ imw_load_one_font(Font *f, FcPattern *src_pattern, double pxsize)
 		return 0;
 	}
 
+	int face_index = 0;
+	FcPatternGetInteger(match, FC_INDEX, 0, &face_index);
+
 	int wantv, gotv;
 	if (FcPatternGetInteger(p, FC_SLANT, 0, &wantv) == FcResultMatch &&
 	    FcPatternGetInteger(match, FC_SLANT, 0, &gotv) == FcResultMatch && wantv != gotv)
@@ -4277,6 +4381,7 @@ imw_load_one_font(Font *f, FcPattern *src_pattern, double pxsize)
 	}
 
 	ImFontConfig cfg;
+	cfg.FontNo = face_index;
 	cfg.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LoadColor;
 	f->match =
 	    ImGui::GetIO().Fonts->AddFontFromFileTTF((const char *) file, (float) pxsize, &cfg);
@@ -4312,14 +4417,19 @@ imw_load_fallback(const char *fc_query, double pxsize)
 		return;
 	}
 
+	int face_index = 0;
+	FcPatternGetInteger(match, FC_INDEX, 0, &face_index);
+
 	ImFontConfig cfg;
 	cfg.MergeMode = true;
+	cfg.FontNo = face_index;
 	cfg.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LoadColor | ImGuiFreeTypeLoaderFlags_Bitmap;
 #ifndef _WIN32
 	if (strstr(fc_query, "und-zsye") != NULL)
 		cfg.RasterizerDensity = 20.0f / (float) pxsize;
 #endif
 	ImGui::GetIO().Fonts->AddFontFromFileTTF((const char *) file, (float) pxsize, &cfg);
+
 	FcPatternDestroy(match);
 }
 
@@ -4362,10 +4472,15 @@ imw_load_terminal_symbols(double pxsize)
 		if (!match) continue;
 
 		FcChar8 *file = NULL;
+		int face_index = 0;
 		bool ok = (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file);
 		if (ok)
+		{
+			FcPatternGetInteger(match, FC_INDEX, 0, &face_index);
+			cfg.FontNo = face_index;
 			ImGui::GetIO().Fonts->AddFontFromFileTTF(
 			    (const char *) file, (float) pxsize, &cfg);
+		}
 		FcPatternDestroy(match);
 		if (ok)
 			return;
@@ -4373,11 +4488,8 @@ imw_load_terminal_symbols(double pxsize)
 }
 
 void
-Terminal::load_fonts_once()
+Terminal::load_fonts(float px_override)
 {
-	if (s_fonts_loaded)
-		return;
-
 	/* Deterministic font for the test harness. When TERMINAL_FONT points at a
 	   .ttf we load it directly (bypassing fontconfig) into all four slots, so
 	   cell metrics and variant routing are identical on every machine — the
@@ -4390,10 +4502,10 @@ Terminal::load_fonts_once()
 		for (Font *f : slots)
 		{
 			memset(f, 0, sizeof *f);
-			f->pxsize = 16.0f;
+			f->pxsize = px_override > 0.0f ? px_override : 16.0f;
 			ImFontConfig cfg;
 			f->match =
-			    ImGui::GetIO().Fonts->AddFontFromFileTTF(test_font, 16.0f, &cfg);
+			    ImGui::GetIO().Fonts->AddFontFromFileTTF(test_font, f->pxsize, &cfg);
 			if (!f->match)
 				die("imgui_terminal: cannot load TERMINAL_FONT: %s\n", test_font);
 		}
@@ -4422,7 +4534,16 @@ Terminal::load_fonts_once()
 		die("imgui_terminal: failed to parse font pattern: %s\n", font);
 
 	double pxsize = 16.0;
-	FcPatternGetDouble(pattern, FC_PIXEL_SIZE, 0, &pxsize);
+	if (px_override > 0.0f)
+	{
+		pxsize = px_override;
+		FcPatternDel(pattern, FC_PIXEL_SIZE);
+		FcPatternAddDouble(pattern, FC_PIXEL_SIZE, pxsize);
+	}
+	else
+	{
+		FcPatternGetDouble(pattern, FC_PIXEL_SIZE, 0, &pxsize);
+	}
 
 	/* Load the base font first — it gets the full glyph set. */
 	imw_load_one_font(&s_dc.font, pattern, pxsize);
@@ -4446,6 +4567,13 @@ Terminal::load_fonts_once()
 
 	FcPatternDestroy(pattern);
 	s_fonts_loaded = true;
+}
+
+void
+Terminal::load_fonts_once()
+{
+	if (!s_fonts_loaded)
+		load_fonts(0.0f);
 }
 
 static void
@@ -4497,14 +4625,23 @@ Terminal::set_font_size(float px)
 		px = 6.0f;
 	if (px > 72.0f)
 		px = 72.0f;
-	s_dc.font.pxsize = px;
-	s_dc.bfont.pxsize = px;
-	s_dc.ifont.pxsize = px;
-	s_dc.ibfont.pxsize = px;
+	if (fabsf(px - s_dc.font.pxsize) < 0.01f)
+		return;
+
+	/* The color-emoji fallback uses a fixed bitmap strike and derives its
+	   RasterizerDensity from the requested font size. Rebuild the merged font
+	   sources so zooming does not reuse the density calculated for 16 px. */
+	ImGui::GetIO().Fonts->Clear();
+	s_fonts_loaded = false;
+	metrics_derived = false;
+	load_fonts(px);
 	finalize_metrics();
 
+	row_ops.clear();
+	overlay_ops.clear();
 	tw.tw = 0;
 	tw.th = 0;
+	m_changed = true;
 }
 
 void
@@ -4853,6 +4990,11 @@ Terminal::set_retained(bool on)
 void
 Terminal::init(int cols, int rows, char **argv)
 {
+	/* wcwidth() uses LC_CTYPE.  A C/C++ process starts in the "C" locale,
+	   where non-ASCII runes have no width and would fall back to one cell.
+	   Adopt the user's character locale before any PTY output is decoded so
+	   wide CJK and emoji glyphs occupy the same two cells the child expects. */
+	setlocale(LC_CTYPE, "");
 
 	tw.cw = 8;
 	tw.ch = 16;
@@ -4945,7 +5087,7 @@ Terminal::draw_canvas()
 
 	dispatch_mouse();
 
-	if (metrics_derived)
+	if (metrics_derived && (m_changed || !m_retained))
 		draw();
 
 	bool changed = m_changed;
