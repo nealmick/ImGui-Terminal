@@ -1453,15 +1453,39 @@ Terminal::ttyhangup()
 		w32_hpc = NULL;
 	}
 #else
-	// Send SIGHUP to shell, then reap this instance's own child so it
-	// does not become a zombie (the shared sigchld handler no longer reaps).
-	if (pid > 0)
+	const pid_t child = pid;
+	pid = 0;
+	alive = 0;
+
+	/* Close the master first. The kernel sends SIGHUP to the foreground
+	   process group (vim/btop/etc). Leaving the fd open is why those
+	   jobs survive a signal sent only to the shell, and waitpid(2)
+	   then freezes the UI thread until they quit. */
+	if (cmdfd >= 0)
 	{
-		kill(pid, SIGHUP);
-		waitpid(pid, NULL, 0);
-		pid = 0;
-		alive = 0;
+		close(cmdfd);
+		cmdfd = -1;
 	}
+
+	if (child <= 0)
+		return;
+
+	/* Child called setsid(): -pid is the session / original process group. */
+	kill(-child, SIGHUP);
+
+	int status;
+	if (waitpid(child, &status, WNOHANG) != 0)
+		return;
+
+	kill(-child, SIGTERM);
+	for (int i = 0; i < 20; ++i)
+	{
+		if (waitpid(child, &status, WNOHANG) != 0)
+			return;
+		usleep(5000);
+	}
+	kill(-child, SIGKILL);
+	waitpid(child, &status, WNOHANG);
 #endif
 }
 
@@ -5122,11 +5146,7 @@ Terminal::draw_widget(const char *id)
 void
 Terminal::shutdown()
 {
-	if (cmdfd >= 0)
-	{
-		ttyhangup();
-		cmdfd = -1;
-	}
+	ttyhangup();
 }
 
 Terminal::~Terminal() = default;
